@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   Bluetooth,
   Camera,
@@ -512,35 +513,50 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
       </section>
 
       {/* STX AI HOLOGRAPHIC ASSISTANT OVERLAY */}
-      {overlayMode === 'stx' && (
-        <div className="absolute inset-2 z-30 border border-[#00F0FF]/45 bg-[#020408]/96 flex flex-col p-2.5 shadow-[0_0_32px_rgba(0,0,0,0.95)]">
-          <div className="flex items-center justify-between border-b border-[#00F0FF]/20 pb-1.5 mb-1 shrink-0">
-            <span className="font-display text-xs font-bold tracking-[0.18em] text-[#E6F8FF]">
-              STX AI HOLOGRAM
-            </span>
-            <button
-              type="button"
-              onClick={() => setOverlayMode('none')}
-              className="p-1 border border-[#00F0FF]/35 text-[#00F0FF] hover:bg-[#00F0FF]/15 cursor-pointer"
-              aria-label="Close STX AI"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          <div className="flex-1 min-h-0">
-            <StxHologram
-              listening={voiceActive}
-              onToggleListening={onToggleVoice}
-              lastResponse={lastStxMsg}
-              onSendCommand={onSendStxCommand}
-            />
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {overlayMode === 'stx' && (
+          <motion.div
+            key="portrait-stx-overlay"
+            initial={{ opacity: 0, scale: 0.975 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.985 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute inset-2 z-30 border border-[#00F0FF]/45 bg-[#020408]/96 flex flex-col p-2.5 shadow-[0_0_32px_rgba(0,0,0,0.95)]"
+          >
+            <div className="flex items-center justify-between border-b border-[#00F0FF]/20 pb-1.5 mb-1 shrink-0">
+              <span className="font-display text-xs font-bold tracking-[0.18em] text-[#E6F8FF]">
+                STX AI HOLOGRAM
+              </span>
+              <button
+                type="button"
+                onClick={() => setOverlayMode('none')}
+                className="p-1 border border-[#00F0FF]/35 text-[#00F0FF] hover:bg-[#00F0FF]/15 cursor-pointer"
+                aria-label="Close STX AI"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <StxHologram
+                listening={voiceActive}
+                onToggleListening={onToggleVoice}
+                lastResponse={lastStxMsg}
+                onSendCommand={onSendStxCommand}
+              />
+            </div>
+          </motion.div>
+        )}
 
-      {/* IN-PORTRAIT MODULE CAROUSEL OVERLAY */}
-      {overlayMode === 'module' && (
-        <div className="absolute inset-2 z-30 border border-[#00F0FF]/40 bg-[#020408]/96 flex flex-col p-2 shadow-[0_0_32px_rgba(0,0,0,0.95)]">
+        {/* IN-PORTRAIT MODULE CAROUSEL OVERLAY */}
+        {overlayMode === 'module' && (
+          <motion.div
+            key="portrait-module-overlay"
+            initial={{ opacity: 0, scale: 0.975 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.985 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+            className="absolute inset-2 z-30 border border-[#00F0FF]/40 bg-[#020408]/96 flex flex-col p-2 shadow-[0_0_32px_rgba(0,0,0,0.95)]"
+          >
           <div className="flex items-center justify-between px-1 pb-1.5 shrink-0 gap-2">
             <div className="flex items-center gap-2 min-w-0">
               {selectedApp && onStepBackApp && (
@@ -629,8 +645,9 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
               </button>
             </div>
           </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

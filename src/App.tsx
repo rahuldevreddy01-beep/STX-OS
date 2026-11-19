@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { ChevronLeft, Maximize2, Minimize2, RotateCw, ShieldAlert } from 'lucide-react';
-import { HingeTransitionOverlay } from './components/HingeTransitionOverlay';
 import { LandscapeHubView } from './components/LandscapeHubView';
 import { LandscapeToolView } from './components/LandscapeToolView';
 import { PortraitView } from './components/PortraitView';
@@ -40,8 +40,6 @@ export default function App() {
   const [activeSubId, setActiveSubId] = useState<string>('app-stx');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
 
-  const [hingeActive, setHingeActive] = useState(false);
-  const [hingeDir, setHingeDir] = useState<'horizontal' | 'vertical'>('horizontal');
   const [pulseTrigger, setPulseTrigger] = useState(0);
 
   const [now, setNow] = useState<Date>(() => new Date());
@@ -83,7 +81,6 @@ export default function App() {
     typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false
   );
 
-  const hingeTimeoutRef = useRef<number | null>(null);
   const lastOrientationRef = useRef<'portrait' | 'landscape' | null>(
     typeof window !== 'undefined'
       ? window.innerHeight > window.innerWidth
@@ -175,17 +172,9 @@ export default function App() {
   }, []);
 
   const triggerHingeTransition = useCallback(
-    (nextMode: HudMode, direction: 'horizontal' | 'vertical' = 'horizontal') => {
-      if (hingeTimeoutRef.current) {
-        window.clearTimeout(hingeTimeoutRef.current);
-      }
-      hudSound.playHingeSweep();
-      setHingeDir(direction);
-      setHingeActive(true);
+    (nextMode: HudMode, _direction: 'horizontal' | 'vertical' = 'horizontal') => {
+      hudSound.playDetentClick();
       setMode(nextMode);
-      hingeTimeoutRef.current = window.setTimeout(() => {
-        setHingeActive(false);
-      }, 280);
     },
     []
   );
@@ -580,9 +569,7 @@ export default function App() {
     <div className="relative h-dvh w-screen overflow-hidden hud-obsidian-bg flex flex-col items-center justify-center">
       <div className="relative z-20 flex-1 w-full flex items-center justify-center min-h-0">
         <div
-          className={`relative overflow-hidden bg-[#020306]/92 shadow-[0_0_48px_rgba(0,0,0,0.95)] ${containerClass} ${
-            hingeActive ? 'animate-rgb-glitch' : ''
-          }`}
+          className={`relative overflow-hidden bg-[#020306]/92 shadow-[0_0_48px_rgba(0,0,0,0.95)] transition-[width,height,border-radius] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${containerClass}`}
         >
           <div className="pointer-events-none absolute inset-0 hud-scanlines z-10" />
 
@@ -594,7 +581,16 @@ export default function App() {
           )}
 
           <div className="relative z-20 h-full w-full">
-            {mode === 'portrait' && (
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={mode}
+                initial={{ opacity: 0, scale: 0.988 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.992 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full w-full"
+              >
+                {mode === 'portrait' && (
               <PortraitView
                 now={now}
                 greeting={greeting}
@@ -725,6 +721,8 @@ export default function App() {
                 </div>
               </div>
             )}
+              </motion.div>
+            </AnimatePresence>
           </div>
 
           {toggles.lock && (
@@ -750,8 +748,6 @@ export default function App() {
               </button>
             </div>
           )}
-
-          <HingeTransitionOverlay active={hingeActive} direction={hingeDir} />
         </div>
       </div>
 
