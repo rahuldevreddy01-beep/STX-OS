@@ -28,6 +28,18 @@ export interface QuickToggles {
   mute: boolean;
 }
 
+export type WindowAppKind =
+  | 'settings'
+  | 'phone'
+  | 'messages'
+  | 'browser'
+  | 'maps'
+  | 'music'
+  | 'terminal'
+  | 'calc'
+  | 'clock'
+  | 'notes';
+
 export interface AppItem {
   id: string;
   name: string;
@@ -38,8 +50,12 @@ export interface AppItem {
   pinnedToDock: boolean;
   notificationsEnabled: boolean;
   backgroundSync: boolean;
+  batteryOpt?: 'OPTIMIZED' | 'UNRESTRICTED';
   permissions: string;
+  storageMb?: number;
+  version?: string;
   targetWedge?: WedgeId;
+  windowApp?: WindowAppKind;
 }
 
 export interface WifiNetwork {
@@ -74,4 +90,42 @@ export interface StxLogEntry {
   sender: 'USER' | 'STX';
   text: string;
   timestamp: string;
+}
+
+export interface OsPreferences {
+  hapticsEnabled: boolean;
+  brightnessPct: number;
+  scanlinesEnabled: boolean;
+  keepAwake: boolean;
+}
+
+export interface DeviceTelemetry {
+  batteryPct: number;
+  isCharging: boolean;
+  chargingTimeSec: number | null;
+  dischargingTimeSec: number | null;
+  batterySupported: boolean;
+  online: boolean;
+  netType: string;
+  downlinkMbps: number;
+  rttMs: number;
+  steps: number;
+  stepActive: boolean;
+  sensorSupported: boolean;
+  sensorNeedsPermission: boolean;
+  headingDeg: number;
+  pitchDeg: number;
+  rollDeg: number;
+  accelMag: number;
+  gyroActive: boolean;
+  gpsCoords: { lat: number; lon: number; accuracy: number } | null;
+  gpsStatus: 'IDLE' | 'LOCKING' | 'LOCKED' | 'DENIED';
+  wakeLockActive: boolean;
+  torchHardwareActive: boolean;
+  btScanning: boolean;
+  btDeviceName: string | null;
+  btStatus: string;
+  uptimeSec: number;
+  cpuCores: number;
+  deviceMemGb: number | null;
 }

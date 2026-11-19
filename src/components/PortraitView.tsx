@@ -13,6 +13,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Settings,
   Signal,
   SkipBack,
   SkipForward,
@@ -25,6 +26,7 @@ import { AMBIENT_TRACKS, ROOT_WEDGE_OPTIONS } from '../data/hudData';
 import {
   AppItem,
   BriefingEntry,
+  DeviceTelemetry,
   DialOption,
   QuickToggles,
   StxLogEntry,
@@ -41,19 +43,20 @@ interface PortraitViewProps {
   now: Date;
   greeting: string;
   tickerLine: string;
-  batteryPct: number;
-  memPct: number;
+  telemetry: DeviceTelemetry;
   activeWedge: WedgeId;
   dialOptions: DialOption[];
   activeSubId: string;
   onSelectRootWedge: (wedge: WedgeId, openTool?: boolean) => void;
   onSelectSubOption: (id: string, activate?: boolean) => void;
+  onLaunchApp: (app: AppItem) => void;
+  onOpenSettings: () => void;
   onStepBackApp?: () => void;
   selectedApp: AppItem | null;
   apps: AppItem[];
   onToggleAppSetting: (
     appId: string,
-    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync'
+    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync' | 'batteryOpt'
   ) => void;
   onClearAppCache: (appId: string) => void;
   toggles: QuickToggles;
@@ -70,6 +73,9 @@ interface PortraitViewProps {
   onTogglePlay: () => void;
   trackIndex: number;
   onStepTrack: (dir: -1 | 1) => void;
+  onEnableSensors: () => Promise<boolean>;
+  onResetSteps: () => void;
+  onScanBluetooth: () => Promise<string | null>;
   cameraMode: 'OPTICAL' | 'THERMAL' | 'NIGHT';
   cameraZoom: number;
   liveCameraEnabled: boolean;
@@ -82,13 +88,14 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   now,
   greeting,
   tickerLine,
-  batteryPct,
-  memPct,
+  telemetry,
   activeWedge,
   dialOptions,
   activeSubId,
   onSelectRootWedge,
   onSelectSubOption,
+  onLaunchApp,
+  onOpenSettings,
   onStepBackApp,
   selectedApp,
   apps,
@@ -108,6 +115,9 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   onTogglePlay,
   trackIndex,
   onStepTrack,
+  onEnableSensors,
+  onResetSteps,
+  onScanBluetooth,
   cameraMode,
   cameraZoom,
   liveCameraEnabled,
@@ -211,9 +221,19 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <Wifi className={`w-3 h-3 ${toggles.wifi ? 'text-[#00F0FF]' : 'text-[#FF2A4B]/60'}`} />
+          <Wifi className={`w-3 h-3 ${toggles.wifi && telemetry.online ? 'text-[#00F0FF]' : 'text-[#FF2A4B]/60'}`} />
           <Signal className="w-3 h-3 text-[#00F0FF]" />
-          <span className="text-[#E6F8FF] font-semibold">{batteryPct}%</span>
+          <span className="text-[#E6F8FF] font-semibold">
+            {telemetry.batteryPct}%{telemetry.isCharging ? '⚡' : ''}
+          </span>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            aria-label="Open Android Settings"
+            className="p-1 border border-[#00F0FF]/45 bg-[#040A12] text-[#00F0FF] cursor-pointer hover:border-[#00F0FF]"
+          >
+            <Settings className="w-3 h-3" />
+          </button>
           <button
             type="button"
             onClick={() => openModule('STX')}
@@ -229,9 +249,9 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
         <div className="relative flex items-center justify-center w-full">
           <div className="absolute left-0.5 bottom-0.5 z-10">
             <CircularMicroGauge
-              value={batteryPct}
-              label={`${batteryPct}%`}
-              subLabel="PWR"
+              value={telemetry.batteryPct}
+              label={`${telemetry.batteryPct}%`}
+              subLabel={telemetry.isCharging ? 'CHG' : 'PWR'}
               accent="cyan"
               size={gaugeSize}
             />
@@ -247,9 +267,9 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
 
           <div className="absolute right-0.5 bottom-0.5 z-10">
             <CircularMicroGauge
-              value={memPct}
-              label={`${memPct}%`}
-              subLabel="MEM"
+              value={Math.min(100, Math.round((telemetry.steps / 10000) * 100))}
+              label={telemetry.steps > 999 ? `${(telemetry.steps / 1000).toFixed(1)}K` : `${telemetry.steps}`}
+              subLabel="STEPS"
               accent="crimson"
               size={gaugeSize}
             />
@@ -402,22 +422,32 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
 
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-[#190910] overflow-hidden flex gap-0.5">
-                <div className="h-full bg-[#FF2A4B]" style={{ width: '78%' }} />
-                <div className="h-full bg-[#FF2A4B]/45" style={{ width: '10%' }} />
+              <div className="flex-1 h-1.5 bg-[#190910] overflow-hidden">
+                <div
+                  className="h-full bg-[#FF2A4B]"
+                  style={{ width: `${telemetry.batteryPct}%` }}
+                />
               </div>
-              <span className="font-mono-hud text-[8px] text-[#FF2A4B] w-10 text-right">
-                PWR {batteryPct}
+              <span className="font-mono-hud text-[8px] text-[#FF2A4B] w-14 text-right">
+                {telemetry.isCharging ? '⚡' : 'PWR'} {telemetry.batteryPct}%
               </span>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-[#05141C] overflow-hidden flex gap-0.5">
-                <div className="h-full bg-[#00F0FF]" style={{ width: '64%' }} />
-                <div className="h-full bg-[#00F0FF]/40" style={{ width: '18%' }} />
+              <div className="flex-1 h-1.5 bg-[#05141C] overflow-hidden">
+                <div
+                  className="h-full bg-[#00F0FF]"
+                  style={{
+                    width: `${
+                      toggles.wifi && telemetry.online
+                        ? Math.min(100, Math.max(25, Math.round(telemetry.downlinkMbps * 4)))
+                        : 4
+                    }%`,
+                  }}
+                />
               </div>
-              <span className="font-mono-hud text-[8px] text-[#00F0FF] w-10 text-right">
-                NET {toggles.wifi ? '96' : '00'}
+              <span className="font-mono-hud text-[8px] text-[#00F0FF] w-14 text-right">
+                {toggles.wifi && telemetry.online ? telemetry.netType : 'OFF'}
               </span>
             </div>
           </div>
@@ -593,6 +623,7 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
               dialOptions={dialOptions}
               activeSubId={activeSubId}
               onSelectSubOption={onSelectSubOption}
+              onLaunchApp={onLaunchApp}
               selectedApp={selectedApp}
               apps={apps}
               onToggleAppSetting={onToggleAppSetting}
@@ -607,8 +638,10 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
               onSendStxCommand={onSendStxCommand}
               voiceActive={voiceActive}
               onToggleVoice={onToggleVoice}
-              batteryPct={batteryPct}
-              memPct={memPct}
+              telemetry={telemetry}
+              onEnableSensors={onEnableSensors}
+              onResetSteps={onResetSteps}
+              onScanBluetooth={onScanBluetooth}
               cameraMode={cameraMode}
               cameraZoom={cameraZoom}
               liveCameraEnabled={liveCameraEnabled}

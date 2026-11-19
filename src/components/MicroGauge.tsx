@@ -148,10 +148,11 @@ export const CompassRadarDial: React.FC<CompassRadarDialProps> = ({
       </div>
       <div className="flex flex-col leading-tight">
         <span className="font-mono-hud text-[9px] tracking-[0.18em] text-[#00F0FF]/70">
-          VECTOR
+          HEADING
         </span>
         <span className="font-mono-hud text-[11px] font-semibold text-[#E6F8FF] tabular-nums">
-          SW {Math.round(headingDeg)}°
+          {['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round((((headingDeg % 360) + 360) % 360) / 45) % 8]}{' '}
+          {Math.round(((headingDeg % 360) + 360) % 360)}°
         </span>
       </div>
     </div>

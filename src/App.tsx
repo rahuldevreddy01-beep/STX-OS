@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { ChevronLeft, Maximize2, Minimize2, RotateCw, ShieldAlert } from 'lucide-react';
+import { AppWindowModal } from './components/AppWindowModal';
 import { LandscapeHubView } from './components/LandscapeHubView';
 import { LandscapeToolView } from './components/LandscapeToolView';
 import { PortraitView } from './components/PortraitView';
@@ -17,11 +18,13 @@ import {
   VAULT_FILES,
   WIFI_DIAL_OPTIONS,
 } from './data/hudData';
+import { useDeviceTelemetry } from './hooks/useDeviceTelemetry';
 import {
   AppItem,
   BriefingEntry,
   DialOption,
   HudMode,
+  OsPreferences,
   QuickToggles,
   StxLogEntry,
   WedgeId,
@@ -37,16 +40,14 @@ export default function App() {
     return 'landscape-hub';
   });
   const [activeWedge, setActiveWedge] = useState<WedgeId>('APPS');
-  const [activeSubId, setActiveSubId] = useState<string>('app-stx');
+  const [activeSubId, setActiveSubId] = useState<string>('app-settings');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [activeWindowAppId, setActiveWindowAppId] = useState<string | null>(null);
 
   const [pulseTrigger, setPulseTrigger] = useState(0);
 
   const [now, setNow] = useState<Date>(() => new Date());
   const [tickerIdx, setTickerIdx] = useState(0);
-  const [telemetryCounter, setTelemetryCounter] = useState(659296346);
-  const [batteryPct] = useState(97);
-  const [memPct, setMemPct] = useState(15);
 
   const [apps, setApps] = useState<AppItem[]>(INITIAL_LAUNCHER_APPS);
   const [toggles, setToggles] = useState<QuickToggles>({
@@ -56,6 +57,12 @@ export default function App() {
     lock: false,
     sync: true,
     mute: false,
+  });
+  const [osPrefs, setOsPrefs] = useState<OsPreferences>({
+    hapticsEnabled: true,
+    brightnessPct: 100,
+    scanlinesEnabled: true,
+    keepAwake: false,
   });
   const [networks, setNetworks] = useState<WifiNetwork[]>(INITIAL_WIFI_NETWORKS);
   const [briefings, setBriefings] = useState<BriefingEntry[]>(INITIAL_BRIEFINGS);
@@ -72,7 +79,7 @@ export default function App() {
     {
       id: 's1',
       sender: 'STX',
-      text: 'STX AI holographic core online. Rotate the dial or issue a command.',
+      text: 'STX AI holographic core online. Rotate the dial or launch any app window.',
       timestamp: 'LOCAL',
     },
   ]);
@@ -80,6 +87,20 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() =>
     typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false
   );
+
+  const {
+    telemetry,
+    enableMotionSensors,
+    resetSteps,
+    scanBluetooth,
+    requestGpsLock,
+    triggerHaptic,
+  } = useDeviceTelemetry({
+    flashlightOn: toggles.flashlight,
+    keepAwakeOn: toggles.sync || osPrefs.keepAwake,
+    hapticsOn: osPrefs.hapticsEnabled,
+    bluetoothOn: toggles.bluetooth,
+  });
 
   const lastOrientationRef = useRef<'portrait' | 'landscape' | null>(
     typeof window !== 'undefined'
@@ -125,8 +146,6 @@ export default function App() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       setNow(new Date());
-      setTelemetryCounter((prev) => prev + Math.floor(Math.random() * 6 + 1));
-      setMemPct((prev) => (prev === 15 ? 16 : 15));
     }, 1000);
     return () => window.clearInterval(interval);
   }, []);
@@ -144,6 +163,7 @@ export default function App() {
 
   const handleToggleFullscreen = useCallback(async () => {
     hudSound.playDetentClick();
+    triggerHaptic(10);
     try {
       const doc = document as Document & {
         webkitFullscreenElement?: Element | null;
@@ -169,14 +189,15 @@ export default function App() {
     } catch {
       // Ignore fullscreen rejection (e.g. restricted iframe policies)
     }
-  }, []);
+  }, [triggerHaptic]);
 
   const triggerHingeTransition = useCallback(
     (nextMode: HudMode, _direction: 'horizontal' | 'vertical' = 'horizontal') => {
       hudSound.playDetentClick();
+      triggerHaptic(8);
       setMode(nextMode);
     },
-    []
+    [triggerHaptic]
   );
 
   const getDefaultSubId = useCallback(
@@ -197,7 +218,7 @@ export default function App() {
         case 'APPS':
         case 'SEARCH':
         default:
-          return apps[0]?.id ?? 'app-stx';
+          return apps[0]?.id ?? 'app-settings';
       }
     },
     [apps]
@@ -208,14 +229,58 @@ export default function App() {
     [apps, selectedAppId]
   );
 
+  const activeWindowApp = useMemo(
+    () => (activeWindowAppId ? apps.find((a) => a.id === activeWindowAppId) ?? null : null),
+    [apps, activeWindowAppId]
+  );
+
+  const handleLaunchApp = useCallback(
+    (app: AppItem) => {
+      hudSound.playChime();
+      triggerHaptic(12);
+      if (app.windowApp) {
+        setActiveWindowAppId(app.id);
+        return;
+      }
+      if (app.targetWedge) {
+        setSelectedAppId(null);
+        setActiveWedge(app.targetWedge);
+        setActiveSubId(getDefaultSubId(app.targetWedge));
+        setPulseTrigger((p) => p + 1);
+        if (mode === 'landscape-hub' || mode === 'stx-cover') {
+          setMode('landscape-tool');
+        }
+        return;
+      }
+      setActiveWedge('APPS');
+      setSelectedAppId(app.id);
+      setActiveSubId('app-set-open');
+      if (mode === 'landscape-hub' || mode === 'stx-cover') {
+        setMode('landscape-tool');
+      }
+    },
+    [getDefaultSubId, mode, triggerHaptic]
+  );
+
+  const handleOpenSettings = useCallback(() => {
+    hudSound.playDetentClick();
+    triggerHaptic(10);
+    setActiveWindowAppId('app-settings');
+  }, [triggerHaptic]);
+
+  const handleUpdatePrefs = useCallback((patch: Partial<OsPreferences>) => {
+    hudSound.playDetentClick();
+    setOsPrefs((prev) => ({ ...prev, ...patch }));
+  }, []);
+
   const dialOptions: DialOption[] = useMemo(() => {
     if (activeWedge === 'APPS' && selectedApp) {
       return [
         {
           id: 'app-set-open',
-          label: selectedApp.targetWedge ? 'OPEN' : 'RUN',
+          label: selectedApp.windowApp ? 'OPEN POPUP' : 'OPEN',
           shortCode: '01',
-          subtitle: `Launch ${selectedApp.name}`,
+          subtitle: selectedApp.windowApp ? 'Windowed Popup View' : `Launch ${selectedApp.name}`,
           accent: 'cyan',
           isAction: true,
         },
@@ -241,9 +306,16 @@ export default function App() {
           isAction: true,
         },
         {
+          id: 'app-set-batt',
+          label: selectedApp.batteryOpt === 'UNRESTRICTED' ? 'UNRESTRICT' : 'BATT OPT',
+          shortCode: '05',
+          subtitle: 'Battery Optimization',
+          isAction: true,
+        },
+        {
           id: 'app-set-cache',
           label: 'PURGE',
-          shortCode: '05',
+          shortCode: '06',
           subtitle: 'Clear App Cache',
           accent: 'crimson',
           isAction: true,
@@ -251,7 +323,7 @@ export default function App() {
         {
           id: 'app-set-back',
           label: '< BACK',
-          shortCode: '06',
+          shortCode: '07',
           subtitle: 'Return to App List',
           accent: 'crimson',
           isAction: true,
@@ -274,7 +346,7 @@ export default function App() {
         return VAULT_FILES.map((v, i) => ({
           id: v.id,
           label: v.code,
-          shortCode: `0${i + 1}`,
+          shortCode: String(i + 1).padStart(2, '0'),
           subtitle: v.size,
         }));
       case 'APPS':
@@ -283,7 +355,7 @@ export default function App() {
         return apps.map((a, i) => ({
           id: a.id,
           label: a.name,
-          shortCode: `0${i + 1}`,
+          shortCode: String(i + 1).padStart(2, '0'),
           subtitle: a.status,
           accent: a.pinnedToDock ? 'cyan' : undefined,
         }));
@@ -296,11 +368,12 @@ export default function App() {
       setSelectedAppId(null);
       setActiveSubId(getDefaultSubId(wedge));
       setPulseTrigger((p) => p + 1);
+      triggerHaptic(8);
       if (openTool && mode === 'landscape-hub') {
         triggerHingeTransition('landscape-tool', 'horizontal');
       }
     },
-    [getDefaultSubId, mode, triggerHingeTransition]
+    [getDefaultSubId, mode, triggerHaptic, triggerHingeTransition]
   );
 
   const handleSelectSubOption = useCallback(
@@ -317,6 +390,8 @@ export default function App() {
         return;
       }
 
+      triggerHaptic(10);
+
       if (activeWedge === 'APPS' && selectedApp) {
         if (id === 'app-set-back') {
           setSelectedAppId(null);
@@ -324,11 +399,7 @@ export default function App() {
           return;
         }
         if (id === 'app-set-open') {
-          if (selectedApp.targetWedge) {
-            setSelectedAppId(null);
-            setActiveWedge(selectedApp.targetWedge);
-            setActiveSubId(getDefaultSubId(selectedApp.targetWedge));
-          }
+          handleLaunchApp(selectedApp);
           return;
         }
         if (id === 'app-set-pin') {
@@ -357,6 +428,19 @@ export default function App() {
           );
           return;
         }
+        if (id === 'app-set-batt') {
+          setApps((prev) =>
+            prev.map((a) =>
+              a.id === selectedApp.id
+                ? {
+                    ...a,
+                    batteryOpt: a.batteryOpt === 'UNRESTRICTED' ? 'OPTIMIZED' : 'UNRESTRICTED',
+                  }
+                : a
+            )
+          );
+          return;
+        }
         if (id === 'app-set-cache') {
           setApps((prev) =>
             prev.map((a) => (a.id === selectedApp.id ? { ...a, status: 'PURGED' } : a))
@@ -374,9 +458,22 @@ export default function App() {
         }
       }
 
-      if (activeWedge === 'WIFI' && id === 'w-toggle') {
-        setToggles((p) => ({ ...p, wifi: !p.wifi }));
-        return;
+      if (activeWedge === 'WIFI') {
+        if (id === 'w-toggle') {
+          setToggles((p) => ({ ...p, wifi: !p.wifi }));
+          return;
+        }
+        if (id === 'w-bluetooth') {
+          void scanBluetooth();
+          return;
+        }
+      }
+
+      if (activeWedge === 'HEALTH') {
+        if (id === 'h-steps' || id === 'h-gyro') {
+          void enableMotionSensors();
+          return;
+        }
       }
 
       if (activeWedge === 'CAMERA') {
@@ -400,14 +497,28 @@ export default function App() {
             {
               id: `s-${Date.now()}`,
               sender: 'STX',
-              text: `Diagnostics clean: Core ${batteryPct}%, Memory ${memPct}%, RF link 96%.`,
+              text: `Diagnostics: Battery ${telemetry.batteryPct}% (${telemetry.isCharging ? 'Charging' : 'On Battery'}), Steps ${telemetry.steps}, Heading ${Math.round(telemetry.headingDeg)}°, Net ${telemetry.netType} ${telemetry.downlinkMbps} Mbps.`,
               timestamp: 'NOW',
             },
           ]);
         }
       }
     },
-    [activeWedge, apps, batteryPct, getDefaultSubId, memPct, selectedApp]
+    [
+      activeWedge,
+      apps,
+      enableMotionSensors,
+      handleLaunchApp,
+      scanBluetooth,
+      selectedApp,
+      telemetry.batteryPct,
+      telemetry.downlinkMbps,
+      telemetry.headingDeg,
+      telemetry.isCharging,
+      telemetry.netType,
+      telemetry.steps,
+      triggerHaptic,
+    ]
   );
 
   const handleStepBackLevel = useCallback(() => {
@@ -419,50 +530,80 @@ export default function App() {
     triggerHingeTransition('landscape-hub', 'horizontal');
   }, [selectedApp, triggerHingeTransition]);
 
-  const handleToggleControl = useCallback((key: keyof QuickToggles) => {
-    setToggles((prev) => {
-      const nextVal = !prev[key];
-      if (key !== 'mute' || !nextVal) {
-        hudSound.playDetentClick();
-      }
-      return { ...prev, [key]: nextVal };
-    });
-  }, []);
-
-  const handleToggleAppSetting = useCallback(
-    (appId: string, field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync') => {
-      hudSound.playDetentClick();
-      setApps((prev) =>
-        prev.map((a) => (a.id === appId ? { ...a, [field]: !a[field] } : a))
-      );
+  const handleToggleControl = useCallback(
+    (key: keyof QuickToggles) => {
+      triggerHaptic(10);
+      setToggles((prev) => {
+        const nextVal = !prev[key];
+        if (key !== 'mute' || !nextVal) {
+          hudSound.playDetentClick();
+        }
+        return { ...prev, [key]: nextVal };
+      });
     },
-    []
+    [triggerHaptic]
   );
 
-  const handleClearAppCache = useCallback((appId: string) => {
-    hudSound.playChime();
-    setApps((prev) => prev.map((a) => (a.id === appId ? { ...a, status: 'PURGED' } : a)));
-  }, []);
+  const handleToggleAppSetting = useCallback(
+    (
+      appId: string,
+      field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync' | 'batteryOpt'
+    ) => {
+      hudSound.playDetentClick();
+      triggerHaptic(8);
+      setApps((prev) =>
+        prev.map((a) => {
+          if (a.id !== appId) return a;
+          if (field === 'batteryOpt') {
+            return {
+              ...a,
+              batteryOpt: a.batteryOpt === 'UNRESTRICTED' ? 'OPTIMIZED' : 'OPTIMIZED' === a.batteryOpt ? 'UNRESTRICTED' : 'OPTIMIZED',
+            };
+          }
+          return { ...a, [field]: !a[field] };
+        })
+      );
+    },
+    [triggerHaptic]
+  );
 
-  const handleConnectNetwork = useCallback((ssid: string) => {
-    hudSound.playChime();
-    setNetworks((prev) => prev.map((n) => ({ ...n, connected: n.ssid === ssid })));
-  }, []);
+  const handleClearAppCache = useCallback(
+    (appId: string) => {
+      hudSound.playChime();
+      triggerHaptic(14);
+      setApps((prev) => prev.map((a) => (a.id === appId ? { ...a, status: 'PURGED' } : a)));
+    },
+    [triggerHaptic]
+  );
 
-  const handleToggleBriefing = useCallback((id: string) => {
-    hudSound.playDetentClick();
-    setBriefings((prev) =>
-      prev.map((b) =>
-        b.id === id
-          ? { ...b, priority: b.priority === 'CLEAR' ? 'NOMINAL' : 'CLEAR' }
-          : b
-      )
-    );
-  }, []);
+  const handleConnectNetwork = useCallback(
+    (ssid: string) => {
+      hudSound.playChime();
+      triggerHaptic(10);
+      setNetworks((prev) => prev.map((n) => ({ ...n, connected: n.ssid === ssid })));
+    },
+    [triggerHaptic]
+  );
+
+  const handleToggleBriefing = useCallback(
+    (id: string) => {
+      hudSound.playDetentClick();
+      triggerHaptic(8);
+      setBriefings((prev) =>
+        prev.map((b) =>
+          b.id === id
+            ? { ...b, priority: b.priority === 'CLEAR' ? 'NOMINAL' : 'CLEAR' }
+            : b
+        )
+      );
+    },
+    [triggerHaptic]
+  );
 
   const handleSendStxCommand = useCallback(
     (rawCmd: string) => {
       hudSound.playChime();
+      triggerHaptic(10);
       const cmd = rawCmd.trim();
       const lower = cmd.toLowerCase();
       const stamp = now.toLocaleTimeString([], {
@@ -473,28 +614,38 @@ export default function App() {
 
       let reply = `Directive "${cmd}" executed. All subsystems nominal.`;
 
-      if (lower.includes('wifi')) {
+      const matchingWindowApp = apps.find(
+        (a) => a.windowApp && lower.includes(a.name.toLowerCase())
+      );
+
+      if (matchingWindowApp) {
+        setActiveWindowAppId(matchingWindowApp.id);
+        reply = `Opening ${matchingWindowApp.name} in floating HUD window.`;
+      } else if (lower.includes('wifi')) {
         setToggles((p) => ({ ...p, wifi: !p.wifi }));
         reply = 'Wi-Fi RF link state toggled.';
       } else if (lower.includes('bluetooth') || lower === 'bt') {
         setToggles((p) => ({ ...p, bluetooth: !p.bluetooth }));
         reply = 'Bluetooth tactical radio toggled.';
-      } else if (lower.includes('health') || lower.includes('heart')) {
+      } else if (lower.includes('flash') || lower.includes('torch')) {
+        setToggles((p) => ({ ...p, flashlight: !p.flashlight }));
+        reply = 'Edge screen torch & camera LED toggled.';
+      } else if (lower.includes('health') || lower.includes('heart') || lower.includes('step')) {
         setActiveWedge('HEALTH');
         setSelectedAppId(null);
-        setActiveSubId('h-ecg');
+        setActiveSubId('h-steps');
         if (mode === 'landscape-hub' || mode === 'stx-cover') {
           triggerHingeTransition('landscape-tool', 'horizontal');
         }
-        reply = 'Opening biometric telemetry: 72 BPM Sinus Rhythm.';
+        reply = `Opening sensor biometrics: ${telemetry.steps.toLocaleString()} steps logged today.`;
       } else if (lower.includes('app')) {
         setActiveWedge('APPS');
         setSelectedAppId(null);
-        setActiveSubId(apps[0]?.id ?? 'app-stx');
+        setActiveSubId(apps[0]?.id ?? 'app-settings');
         if (mode === 'landscape-hub' || mode === 'stx-cover') {
           triggerHingeTransition('landscape-tool', 'horizontal');
         }
-        reply = 'Opening launcher matrix. Rotate the half-dial to configure apps.';
+        reply = 'Opening Android app carousel. Tap an app for popup or dial settings.';
       } else if (lower.includes('vault')) {
         setActiveWedge('VAULT');
         setSelectedAppId(null);
@@ -504,7 +655,7 @@ export default function App() {
         }
         reply = 'Vault archive unlocked for inspection.';
       } else if (lower.includes('diag')) {
-        reply = `Core power ${batteryPct}%, memory ${memPct}%, 6GHz link 4ms.`;
+        reply = `Battery ${telemetry.batteryPct}% (${telemetry.isCharging ? 'Charging' : 'On Battery'}), Steps ${telemetry.steps}, Compass ${Math.round(telemetry.headingDeg)}°, Net ${telemetry.netType} ${telemetry.downlinkMbps} Mbps.`;
       }
 
       setStxLogs((prev) => [
@@ -513,7 +664,19 @@ export default function App() {
         { id: `s-${Date.now() + 1}`, sender: 'STX', text: reply, timestamp: stamp },
       ]);
     },
-    [apps, batteryPct, memPct, mode, now, triggerHingeTransition]
+    [
+      apps,
+      mode,
+      now,
+      telemetry.batteryPct,
+      telemetry.downlinkMbps,
+      telemetry.headingDeg,
+      telemetry.isCharging,
+      telemetry.netType,
+      telemetry.steps,
+      triggerHaptic,
+      triggerHingeTransition,
+    ]
   );
 
   const handleStepCarousel = useCallback(
@@ -553,7 +716,6 @@ export default function App() {
     return 'GOOD EVENING';
   }, [now]);
 
-  const telemetryCode = String(telemetryCounter).padStart(10, '0');
   const notifCount = briefings.filter((b) => b.priority === 'HIGH').length;
   const lastStxMsg =
     [...stxLogs].reverse().find((l) => l.sender === 'STX')?.text ?? 'STX AI ready.';
@@ -565,19 +727,16 @@ export default function App() {
         ? 'w-[min(94vw,420px)] h-[min(78dvh,420px)] rounded-[20px] sm:rounded-[24px] border border-[#00F0FF]/35'
         : 'w-full h-full rounded-none border-0';
 
+  const dimOpacity = Math.max(0, (100 - osPrefs.brightnessPct) * 0.0072);
+
   return (
     <div className="relative h-dvh w-screen overflow-hidden hud-obsidian-bg flex flex-col items-center justify-center">
       <div className="relative z-20 flex-1 w-full flex items-center justify-center min-h-0">
         <div
           className={`relative overflow-hidden bg-[#020306]/92 shadow-[0_0_48px_rgba(0,0,0,0.95)] transition-[width,height,border-radius] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${containerClass}`}
         >
-          <div className="pointer-events-none absolute inset-0 hud-scanlines z-10" />
-
-          {toggles.flashlight && (
-            <div
-              className="pointer-events-none absolute inset-0 z-30 border-4 border-[#E6F8FF]/75 shadow-[inset_0_0_75px_rgba(230,248,255,0.38)]"
-              aria-hidden="true"
-            />
+          {osPrefs.scanlinesEnabled && (
+            <div className="pointer-events-none absolute inset-0 hud-scanlines z-10" />
           )}
 
           <div className="relative z-20 h-full w-full">
@@ -591,136 +750,145 @@ export default function App() {
                 className="h-full w-full"
               >
                 {mode === 'portrait' && (
-              <PortraitView
-                now={now}
-                greeting={greeting}
-                tickerLine={STX_TICKER_LINES[tickerIdx]}
-                batteryPct={batteryPct}
-                memPct={memPct}
-                activeWedge={activeWedge}
-                dialOptions={dialOptions}
-                activeSubId={activeSubId}
-                onSelectRootWedge={handleSelectRootWedge}
-                onSelectSubOption={handleSelectSubOption}
-                onStepBackApp={() => {
-                  if (selectedApp) {
-                    setSelectedAppId(null);
-                    setActiveSubId(selectedApp.id);
-                  }
-                }}
-                selectedApp={selectedApp}
-                apps={apps}
-                onToggleAppSetting={handleToggleAppSetting}
-                onClearAppCache={handleClearAppCache}
-                toggles={toggles}
-                onToggleControl={handleToggleControl}
-                networks={networks}
-                onConnectNetwork={handleConnectNetwork}
-                briefings={briefings}
-                onToggleBriefing={handleToggleBriefing}
-                stxLogs={stxLogs}
-                onSendStxCommand={handleSendStxCommand}
-                voiceActive={voiceActive}
-                onToggleVoice={() => setVoiceActive((v) => !v)}
-                isPlaying={isPlaying}
-                onTogglePlay={() => setIsPlaying((p) => !p)}
-                trackIndex={trackIndex}
-                onStepTrack={handleStepCarousel}
-                cameraMode={cameraMode}
-                cameraZoom={cameraZoom}
-                liveCameraEnabled={liveCameraEnabled}
-                onToggleLiveCamera={() => setLiveCameraEnabled((v) => !v)}
-                shutterFlash={shutterFlash}
-                notifCount={notifCount}
-              />
-            )}
-
-            {mode === 'landscape-hub' && (
-              <LandscapeHubView
-                now={now}
-                greeting={greeting}
-                batteryPct={batteryPct}
-                memPct={memPct}
-                telemetryCode={telemetryCode}
-                activeWedge={activeWedge}
-                onSelectWedge={handleSelectRootWedge}
-                toggles={toggles}
-                onToggleControl={handleToggleControl}
-                isPlaying={isPlaying}
-                onTogglePlay={() => setIsPlaying((p) => !p)}
-                trackIndex={trackIndex}
-                onStepTrack={handleStepCarousel}
-                voiceActive={voiceActive}
-                onToggleVoice={() => {
-                  hudSound.playChime();
-                  setVoiceActive((v) => !v);
-                }}
-                pulseTrigger={pulseTrigger}
-              />
-            )}
-
-            {mode === 'landscape-tool' && (
-              <LandscapeToolView
-                now={now}
-                batteryPct={batteryPct}
-                memPct={memPct}
-                activeWedge={activeWedge}
-                dialOptions={dialOptions}
-                activeSubId={activeSubId}
-                onSelectSubOption={handleSelectSubOption}
-                onStepBackLevel={handleStepBackLevel}
-                selectedApp={selectedApp}
-                apps={apps}
-                onToggleAppSetting={handleToggleAppSetting}
-                onClearAppCache={handleClearAppCache}
-                toggles={toggles}
-                onToggleControl={handleToggleControl}
-                networks={networks}
-                onConnectNetwork={handleConnectNetwork}
-                briefings={briefings}
-                onToggleBriefing={handleToggleBriefing}
-                stxLogs={stxLogs}
-                onSendStxCommand={handleSendStxCommand}
-                onStepTrack={handleStepCarousel}
-                voiceActive={voiceActive}
-                onToggleVoice={() => {
-                  hudSound.playChime();
-                  setVoiceActive((v) => !v);
-                }}
-                cameraMode={cameraMode}
-                cameraZoom={cameraZoom}
-                liveCameraEnabled={liveCameraEnabled}
-                onToggleLiveCamera={() => setLiveCameraEnabled((v) => !v)}
-                shutterFlash={shutterFlash}
-                pulseTrigger={pulseTrigger}
-              />
-            )}
-
-            {mode === 'stx-cover' && (
-              <div className="flex flex-col h-full w-full p-3">
-                <div className="flex items-center justify-between pb-1.5 border-b border-[#00F0FF]/15 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => triggerHingeTransition('landscape-hub', 'vertical')}
-                    className="flex items-center gap-1 font-display text-xs font-bold tracking-[0.16em] text-[#E6F8FF] hover:text-[#00F0FF] cursor-pointer"
-                  >
-                    <ChevronLeft className="w-4 h-4 text-[#00F0FF]" />
-                    <span>STX AI</span>
-                  </button>
-                  <span className="font-mono-hud text-[9.5px] text-[#00F0FF]">
-                    {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} · {batteryPct}%
-                  </span>
-                </div>
-                <div className="flex-1 min-h-0">
-                  <StxHologram
-                    listening={voiceActive}
-                    onToggleListening={() => setVoiceActive((v) => !v)}
-                    lastResponse={lastStxMsg}
-                    onSendCommand={handleSendStxCommand}
+                  <PortraitView
+                    now={now}
+                    greeting={greeting}
+                    tickerLine={STX_TICKER_LINES[tickerIdx]}
+                    telemetry={telemetry}
+                    activeWedge={activeWedge}
+                    dialOptions={dialOptions}
+                    activeSubId={activeSubId}
+                    onSelectRootWedge={handleSelectRootWedge}
+                    onSelectSubOption={handleSelectSubOption}
+                    onLaunchApp={handleLaunchApp}
+                    onOpenSettings={handleOpenSettings}
+                    onStepBackApp={() => {
+                      if (selectedApp) {
+                        setSelectedAppId(null);
+                        setActiveSubId(selectedApp.id);
+                      }
+                    }}
+                    selectedApp={selectedApp}
+                    apps={apps}
+                    onToggleAppSetting={handleToggleAppSetting}
+                    onClearAppCache={handleClearAppCache}
+                    toggles={toggles}
+                    onToggleControl={handleToggleControl}
+                    networks={networks}
+                    onConnectNetwork={handleConnectNetwork}
+                    briefings={briefings}
+                    onToggleBriefing={handleToggleBriefing}
+                    stxLogs={stxLogs}
+                    onSendStxCommand={handleSendStxCommand}
+                    voiceActive={voiceActive}
+                    onToggleVoice={() => setVoiceActive((v) => !v)}
+                    onEnableSensors={enableMotionSensors}
+                    onResetSteps={resetSteps}
+                    onScanBluetooth={scanBluetooth}
+                    isPlaying={isPlaying}
+                    onTogglePlay={() => setIsPlaying((p) => !p)}
+                    trackIndex={trackIndex}
+                    onStepTrack={handleStepCarousel}
+                    cameraMode={cameraMode}
+                    cameraZoom={cameraZoom}
+                    liveCameraEnabled={liveCameraEnabled}
+                    onToggleLiveCamera={() => setLiveCameraEnabled((v) => !v)}
+                    shutterFlash={shutterFlash}
+                    notifCount={notifCount}
                   />
-                </div>
-              </div>
-            )}
+                )}
+
+                {mode === 'landscape-hub' && (
+                  <LandscapeHubView
+                    now={now}
+                    greeting={greeting}
+                    telemetry={telemetry}
+                    activeWedge={activeWedge}
+                    onSelectWedge={handleSelectRootWedge}
+                    onOpenSettings={handleOpenSettings}
+                    onEnableSensors={enableMotionSensors}
+                    onScanBluetooth={scanBluetooth}
+                    toggles={toggles}
+                    onToggleControl={handleToggleControl}
+                    isPlaying={isPlaying}
+                    onTogglePlay={() => setIsPlaying((p) => !p)}
+                    trackIndex={trackIndex}
+                    onStepTrack={handleStepCarousel}
+                    voiceActive={voiceActive}
+                    onToggleVoice={() => {
+                      hudSound.playChime();
+                      setVoiceActive((v) => !v);
+                    }}
+                    pulseTrigger={pulseTrigger}
+                  />
+                )}
+
+                {mode === 'landscape-tool' && (
+                  <LandscapeToolView
+                    now={now}
+                    telemetry={telemetry}
+                    activeWedge={activeWedge}
+                    dialOptions={dialOptions}
+                    activeSubId={activeSubId}
+                    onSelectSubOption={handleSelectSubOption}
+                    onLaunchApp={handleLaunchApp}
+                    onStepBackLevel={handleStepBackLevel}
+                    selectedApp={selectedApp}
+                    apps={apps}
+                    onToggleAppSetting={handleToggleAppSetting}
+                    onClearAppCache={handleClearAppCache}
+                    toggles={toggles}
+                    onToggleControl={handleToggleControl}
+                    networks={networks}
+                    onConnectNetwork={handleConnectNetwork}
+                    briefings={briefings}
+                    onToggleBriefing={handleToggleBriefing}
+                    stxLogs={stxLogs}
+                    onSendStxCommand={handleSendStxCommand}
+                    onStepTrack={handleStepCarousel}
+                    voiceActive={voiceActive}
+                    onToggleVoice={() => {
+                      hudSound.playChime();
+                      setVoiceActive((v) => !v);
+                    }}
+                    onEnableSensors={enableMotionSensors}
+                    onResetSteps={resetSteps}
+                    onScanBluetooth={scanBluetooth}
+                    cameraMode={cameraMode}
+                    cameraZoom={cameraZoom}
+                    liveCameraEnabled={liveCameraEnabled}
+                    onToggleLiveCamera={() => setLiveCameraEnabled((v) => !v)}
+                    shutterFlash={shutterFlash}
+                    pulseTrigger={pulseTrigger}
+                  />
+                )}
+
+                {mode === 'stx-cover' && (
+                  <div className="flex flex-col h-full w-full p-3">
+                    <div className="flex items-center justify-between pb-1.5 border-b border-[#00F0FF]/15 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => triggerHingeTransition('landscape-hub', 'vertical')}
+                        className="flex items-center gap-1 font-display text-xs font-bold tracking-[0.16em] text-[#E6F8FF] hover:text-[#00F0FF] cursor-pointer"
+                      >
+                        <ChevronLeft className="w-4 h-4 text-[#00F0FF]" />
+                        <span>STX AI</span>
+                      </button>
+                      <span className="font-mono-hud text-[9.5px] text-[#00F0FF]">
+                        {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })} ·{' '}
+                        {telemetry.batteryPct}%
+                      </span>
+                    </div>
+                    <div className="flex-1 min-h-0">
+                      <StxHologram
+                        listening={voiceActive}
+                        onToggleListening={() => setVoiceActive((v) => !v)}
+                        lastResponse={lastStxMsg}
+                        onSendCommand={handleSendStxCommand}
+                      />
+                    </div>
+                  </div>
+                )}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -740,6 +908,7 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   hudSound.playChime();
+                  triggerHaptic(15);
                   setToggles((p) => ({ ...p, lock: false }));
                 }}
                 className="px-5 py-2 border border-[#00F0FF] bg-[#00F0FF]/15 hover:bg-[#00F0FF]/30 font-display text-xs tracking-[0.18em] text-[#E6F8FF] cursor-pointer"
@@ -809,6 +978,64 @@ export default function App() {
           <span className="hidden sm:inline">{isFullscreen ? 'EXIT FULL' : 'FULLSCREEN'}</span>
         </button>
       </div>
+
+      {/* IN-HUD FLOATING / WINDOWED ANDROID POPUP */}
+      <AnimatePresence>
+        {activeWindowApp && (
+          <AppWindowModal
+            app={activeWindowApp}
+            apps={apps}
+            onClose={() => {
+              hudSound.playDetentClick();
+              setActiveWindowAppId(null);
+            }}
+            onOpenAppDial={(app) => {
+              hudSound.playDetentClick();
+              setActiveWindowAppId(null);
+              setActiveWedge('APPS');
+              setSelectedAppId(app.id);
+              setActiveSubId('app-set-open');
+              if (mode === 'landscape-hub' || mode === 'stx-cover') {
+                setMode('landscape-tool');
+              }
+            }}
+            telemetry={telemetry}
+            toggles={toggles}
+            onToggleControl={handleToggleControl}
+            networks={networks}
+            onConnectNetwork={handleConnectNetwork}
+            prefs={osPrefs}
+            onUpdatePrefs={handleUpdatePrefs}
+            onEnableSensors={enableMotionSensors}
+            onResetSteps={resetSteps}
+            onScanBluetooth={scanBluetooth}
+            onRequestGps={requestGpsLock}
+            onTriggerHaptic={triggerHaptic}
+            onClearAppCache={handleClearAppCache}
+            isPlaying={isPlaying}
+            onTogglePlay={() => setIsPlaying((p) => !p)}
+            trackIndex={trackIndex}
+            onStepTrack={(dir) => setTrackIndex((i) => (i + dir + 3) % 3)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* HARDWARE DISPLAY BRIGHTNESS DIMMER */}
+      {dimOpacity > 0 && (
+        <div
+          className="fixed inset-0 z-[75] pointer-events-none bg-black transition-opacity duration-200"
+          style={{ opacity: dimOpacity }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* FULL-SCREEN-EDGE FLASHLIGHT BEACON (COVERS ALL 4 OUTER EDGES INCLUDING BOTTOM BAR) */}
+      {toggles.flashlight && (
+        <div
+          className="fixed inset-0 z-[90] pointer-events-none border-[6px] sm:border-[8px] border-white shadow-[inset_0_0_95px_rgba(255,255,255,0.62),inset_0_0_24px_rgba(255,255,255,0.95)]"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }

@@ -8,15 +8,17 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Settings,
   SkipBack,
   SkipForward,
   Sparkles,
   Volume2,
   VolumeX,
   Wifi,
+  Zap,
 } from 'lucide-react';
 import { AMBIENT_TRACKS, ROOT_WEDGE_OPTIONS } from '../data/hudData';
-import { QuickToggles, WedgeId } from '../types/hud';
+import { DeviceTelemetry, QuickToggles, WedgeId } from '../types/hud';
 import { hudSound } from '../utils/soundFx';
 import { ArcReactorCore } from './ArcReactorCore';
 import { CompassRadarDial } from './MicroGauge';
@@ -25,11 +27,12 @@ import { TimelineRuler } from './TimelineRuler';
 interface LandscapeHubViewProps {
   now: Date;
   greeting: string;
-  batteryPct: number;
-  memPct: number;
-  telemetryCode: string;
+  telemetry: DeviceTelemetry;
   activeWedge: WedgeId;
   onSelectWedge: (wedge: WedgeId, openTool?: boolean) => void;
+  onOpenSettings: () => void;
+  onEnableSensors: () => Promise<boolean>;
+  onScanBluetooth: () => Promise<string | null>;
   toggles: QuickToggles;
   onToggleControl: (key: keyof QuickToggles) => void;
   isPlaying: boolean;
@@ -41,14 +44,22 @@ interface LandscapeHubViewProps {
   pulseTrigger: number;
 }
 
+function formatUptime(sec: number) {
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':');
+}
+
 export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
   now,
   greeting,
-  batteryPct,
-  memPct,
-  telemetryCode,
+  telemetry,
   activeWedge,
   onSelectWedge,
+  onOpenSettings,
+  onEnableSensors,
+  onScanBluetooth,
   toggles,
   onToggleControl,
   isPlaying,
@@ -83,6 +94,9 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
   const activeConfig = ROOT_WEDGE_OPTIONS.find((w) => w.id === activeWedge) ?? ROOT_WEDGE_OPTIONS[0];
   const currentTrack = AMBIENT_TRACKS[trackIndex % AMBIENT_TRACKS.length];
 
+  const stepGoalPct = Math.min(100, Math.round((telemetry.steps / 10000) * 100));
+  const netPct = !toggles.wifi || !telemetry.online ? 0 : Math.min(100, Math.max(25, Math.round(telemetry.downlinkMbps * 4)));
+
   const toggleItems: {
     key: keyof QuickToggles;
     label: string;
@@ -92,7 +106,7 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
     { key: 'bluetooth', label: 'BT', icon: <Bluetooth className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" /> },
     { key: 'flashlight', label: 'FLASH', icon: <Flashlight className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" /> },
     { key: 'lock', label: 'LOCK', icon: <Lock className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" /> },
-    { key: 'sync', label: 'SYNC', icon: <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" /> },
+    { key: 'sync', label: 'WAKE', icon: <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" /> },
     {
       key: 'mute',
       label: 'MUTE',
@@ -110,12 +124,10 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
         <TimelineRuler now={now} compact />
       </div>
 
-      {/* Responsive Hub Container: stacked scroll on narrow portrait, 3-column tactical HUD on landscape/tablet+ */}
       <div className="flex-1 min-h-0 overflow-y-auto sm:overflow-hidden hud-scroll px-2.5 sm:px-4 pb-2 pt-1">
         <div className="min-h-full sm:h-full flex flex-col sm:grid sm:grid-cols-12 gap-2.5 sm:gap-3 items-stretch">
-          {/* CENTERPIECE FIRST ON MOBILE PORTRAIT, MIDDLE COLUMN ON LANDSCAPE */}
-          <main className="order-1 sm:order-2 sm:col-span-6 relative flex flex-col items-center justify-between min-h-[250px] sm:min-h-0 py-0.5">
-            {/* Passive Active Readout — No separate OPEN button needed; click any wedge on dial */}
+          {/* CENTERPIECE: ROTARY DIAL */}
+          <main className="order-1 sm:order-2 sm:col-span-6 relative flex flex-col items-center justify-between min-h-[245px] sm:min-h-0 py-0.5">
             <div className="flex items-center gap-2 z-10 shrink-0">
               <span className="font-mono-hud text-[9px] tracking-[0.2em] text-[#FF2A4B]">
                 [{activeConfig.shortCode}]
@@ -130,7 +142,7 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
 
             <div
               ref={dialWrapRef}
-              className="relative flex items-center justify-center flex-1 w-full min-h-[168px] sm:min-h-0 py-1"
+              className="relative flex items-center justify-center flex-1 w-full min-h-[164px] sm:min-h-0 py-1"
             >
               <ArcReactorCore
                 variant="rotary-hub"
@@ -198,117 +210,179 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
             </div>
           </main>
 
-          {/* LEFT SIDEBAR (01) */}
+          {/* LEFT SIDEBAR (01) — REAL DEVICE BATTERY, NETWORK, STEPS & GYRO COMPASS */}
           <motion.aside
             initial={{ opacity: 0, x: -16 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
             className="order-2 sm:order-1 sm:col-span-3 flex flex-col justify-between border-t sm:border-t-0 sm:border-r border-[#00F0FF]/15 pt-2 sm:pt-1 sm:pr-3 sm:py-1 sm:min-h-0 sm:overflow-y-auto hud-scroll gap-2"
           >
-            <div className="flex sm:block items-center justify-between gap-2">
+            <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <span className="font-mono-hud text-[10px] sm:text-xs font-bold tracking-[0.2em] text-[#00F0FF]">
-                  01
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono-hud text-[10px] sm:text-xs font-bold tracking-[0.2em] text-[#00F0FF]">
+                    01
+                  </span>
+                  <span className="font-mono-hud text-[8px] px-1 border border-[#00F0FF]/35 text-[#00F0FF]">
+                    {telemetry.cpuCores}C
+                  </span>
+                </div>
                 <h2 className="font-display text-xs sm:text-sm font-bold tracking-[0.08em] text-[#E6F8FF] text-glow-cyan mt-0.5 leading-snug truncate">
                   {greeting}, SANJU
                 </h2>
-                <p className="font-mono-hud text-[8.5px] sm:text-[9px] text-[#00F0FF]/80 mt-0.5 truncate">
-                  • STX AI READY · LOCAL
+                <p className="font-mono-hud text-[8.5px] text-[#00F0FF]/80 mt-0.5 truncate">
+                  {telemetry.isCharging ? '⚡ CHARGING' : '• BATTERY'} · {telemetry.batteryPct}%
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  hudSound.playChime();
-                  onSelectWedge('STX', true);
-                }}
-                className="sm:hidden flex items-center gap-1 px-2 py-1 border border-[#00F0FF]/50 bg-[#00F0FF]/15 font-mono-hud text-[9px] text-[#00F0FF] shrink-0 cursor-pointer"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>STX AI</span>
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  title="OS Settings"
+                  className="p-1.5 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] text-[#00F0FF] cursor-pointer"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hudSound.playChime();
+                    onSelectWedge('STX', true);
+                  }}
+                  className="sm:hidden flex items-center gap-1 px-2 py-1 border border-[#00F0FF]/50 bg-[#00F0FF]/15 font-mono-hud text-[9px] text-[#00F0FF] cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>STX</span>
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1.5 sm:space-y-2">
               <div>
-                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/70 mb-0.5">
-                  <span>CORE POWER</span>
-                  <span className="text-[#00F0FF]">{batteryPct}%</span>
+                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/75 mb-0.5">
+                  <span className="flex items-center gap-1">
+                    {telemetry.isCharging && <Zap className="w-2.5 h-2.5 text-[#00F0FF]" />}
+                    BATTERY
+                  </span>
+                  <span className="text-[#00F0FF]">
+                    {telemetry.batteryPct}% {telemetry.isCharging ? 'CHG' : ''}
+                  </span>
                 </div>
                 <div className="h-1.5 bg-[#071620] overflow-hidden">
-                  <div className="h-full bg-[#00F0FF] glow-cyan" style={{ width: `${batteryPct}%` }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/70 mb-0.5">
-                  <span>RF SIGNAL</span>
-                  <span className="text-[#FF2A4B]">{toggles.wifi ? '96%' : 'OFF'}</span>
-                </div>
-                <div className="h-1.5 bg-[#1B0910] overflow-hidden">
                   <div
-                    className="h-full bg-[#FF2A4B] glow-crimson"
-                    style={{ width: toggles.wifi ? '96%' : '6%' }}
+                    className={`h-full ${telemetry.batteryPct < 20 ? 'bg-[#FF2A4B]' : 'bg-[#00F0FF]'}`}
+                    style={{ width: `${telemetry.batteryPct}%` }}
                   />
                 </div>
               </div>
 
               <div>
-                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/70 mb-0.5">
-                  <span>MEM ALLOC</span>
-                  <span>{memPct}%</span>
+                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/75 mb-0.5">
+                  <span>NET LINK</span>
+                  <span className={toggles.wifi && telemetry.online ? 'text-[#00F0FF]' : 'text-[#FF2A4B]'}>
+                    {toggles.wifi && telemetry.online
+                      ? `${telemetry.netType} ${telemetry.downlinkMbps}M`
+                      : 'OFFLINE'}
+                  </span>
                 </div>
-                <div className="h-1.5 bg-[#071620] overflow-hidden">
-                  <div className="h-full bg-[#E6F8FF]/80" style={{ width: `${memPct}%` }} />
+                <div className="h-1.5 bg-[#1B0910] overflow-hidden">
+                  <div
+                    className="h-full bg-[#FF2A4B]"
+                    style={{ width: `${Math.max(4, netPct)}%` }}
+                  />
                 </div>
               </div>
-            </div>
 
-            <div className="pt-1.5 border-t border-[#00F0FF]/15 flex items-center justify-between gap-2">
-              <CompassRadarDial headingDeg={225 + (now.getSeconds() % 12)} size={42} />
               <button
                 type="button"
                 onClick={() => {
-                  hudSound.playChime();
-                  onSelectWedge('BRIEF', true);
+                  hudSound.playDetentClick();
+                  onSelectWedge('HEALTH', true);
                 }}
-                className="px-2 py-1 border border-[#00F0FF]/35 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[8.5px] tracking-wider text-[#9FEFFF] cursor-pointer shrink-0"
+                className="w-full text-left cursor-pointer group"
               >
-                BRIEFING
+                <div className="flex justify-between font-mono-hud text-[8px] sm:text-[8.5px] text-[#E6F8FF]/75 mb-0.5">
+                  <span className="group-hover:text-[#00F0FF]">STEPS (SENSOR)</span>
+                  <span className="text-[#E6F8FF] font-bold tabular-nums">
+                    {telemetry.steps.toLocaleString()}
+                  </span>
+                </div>
+                <div className="h-1.5 bg-[#071620] overflow-hidden">
+                  <div className="h-full bg-[#E6F8FF]/85" style={{ width: `${Math.max(4, stepGoalPct)}%` }} />
+                </div>
               </button>
+            </div>
+
+            <div className="pt-1.5 border-t border-[#00F0FF]/15 flex items-center justify-between gap-2">
+              <CompassRadarDial headingDeg={telemetry.headingDeg} size={42} />
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                {telemetry.sensorNeedsPermission && !telemetry.gyroActive ? (
+                  <button
+                    type="button"
+                    onClick={() => onEnableSensors()}
+                    className="px-2 py-0.5 border border-[#FF2A4B]/60 bg-[#FF2A4B]/15 font-mono-hud text-[8px] text-[#FFB4C0] cursor-pointer"
+                  >
+                    ENABLE GYRO
+                  </button>
+                ) : (
+                  <span className="font-mono-hud text-[8px] text-[#9FEFFF]">
+                    P:{telemetry.pitchDeg}° R:{telemetry.rollDeg}°
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    hudSound.playChime();
+                    onSelectWedge('BRIEF', true);
+                  }}
+                  className="px-2 py-0.5 border border-[#00F0FF]/35 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[8px] tracking-wider text-[#9FEFFF] cursor-pointer"
+                >
+                  BRIEFING
+                </button>
+              </div>
             </div>
           </motion.aside>
 
-          {/* RIGHT SIDEBAR (02) */}
+          {/* RIGHT SIDEBAR (02) — REAL UPTIME, REAL WIFI/BT/FLASH/WAKE/MUTE CONTROLS */}
           <motion.aside
             initial={{ opacity: 0, x: 16 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
             className="order-3 sm:col-span-3 flex flex-col justify-between border-t sm:border-t-0 sm:border-l border-[#00F0FF]/15 pt-2 sm:pt-1 sm:pl-3 sm:py-1 sm:min-h-0 sm:overflow-y-auto hud-scroll gap-2"
           >
             <div className="text-right">
               <div className="flex items-center justify-between">
-                <span className="font-mono-hud text-[9px] text-[#E6F8FF]/60">31°C</span>
+                <span className="font-mono-hud text-[9px] text-[#00F0FF]/80">
+                  {telemetry.wakeLockActive ? 'WAKE LOCKED' : '31°C CLEAR'}
+                </span>
                 <span className="font-mono-hud text-xs sm:text-sm font-bold text-[#E6F8FF]">{timeStr}</span>
               </div>
               <div className="flex items-center justify-between mt-1">
-                <span className="font-mono-hud text-[8.5px] sm:text-[9px] tracking-[0.2em] text-[#FF2A4B]">
+                <span className="font-mono-hud text-[8.5px] sm:text-[9px] tracking-[0.18em] text-[#FF2A4B]">
                   UPTIME
                 </span>
                 <span className="font-mono-hud text-[11px] sm:text-xs font-bold tracking-[0.2em] text-[#00F0FF]">
                   02
                 </span>
               </div>
-              <div className="font-mono-hud text-sm sm:text-base font-bold tracking-[0.12em] text-[#E6F8FF] text-glow-cyan mt-0.5 tabular-nums truncate">
-                {telemetryCode}
+              <div className="font-mono-hud text-sm sm:text-base font-bold tracking-[0.14em] text-[#E6F8FF] text-glow-cyan mt-0.5 tabular-nums">
+                {formatUptime(telemetry.uptimeSec)}
+              </div>
+              <div className="font-mono-hud text-[8px] text-[#9FEFFF]/70 truncate">
+                BT: {telemetry.btStatus}
               </div>
             </div>
 
             <div>
-              <div className="font-mono-hud text-[8px] sm:text-[8.5px] tracking-[0.18em] text-[#E6F8FF]/55 mb-1.5 flex justify-between">
+              <div className="font-mono-hud text-[8px] sm:text-[8.5px] tracking-[0.14em] text-[#E6F8FF]/55 mb-1.5 flex items-center justify-between gap-1">
                 <span>SYSTEM</span>
-                <span className="text-[#00F0FF]">6 CH</span>
+                <button
+                  type="button"
+                  onClick={() => onScanBluetooth()}
+                  className="px-1.5 py-0.5 border border-[#00F0FF]/40 text-[#00F0FF] hover:bg-[#00F0FF]/15 text-[7.5px] cursor-pointer"
+                >
+                  {telemetry.btScanning ? 'SCAN...' : 'PAIR BT'}
+                </button>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-2 gap-1.5">
                 {toggleItems.map((item) => {

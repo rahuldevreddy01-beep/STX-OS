@@ -2,10 +2,13 @@ import React, { memo, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import {
   Activity,
+  BatteryCharging,
   Bell,
+  Bluetooth,
   Camera,
   Check,
-  ChevronRight,
+  Compass,
+  ExternalLink,
   FolderLock,
   Grid,
   Lock,
@@ -22,6 +25,7 @@ import { VAULT_FILES } from '../data/hudData';
 import {
   AppItem,
   BriefingEntry,
+  DeviceTelemetry,
   DialOption,
   QuickToggles,
   StxLogEntry,
@@ -29,7 +33,7 @@ import {
   WifiNetwork,
 } from '../types/hud';
 import { hudSound } from '../utils/soundFx';
-import { CircularMicroGauge } from './MicroGauge';
+import { CircularMicroGauge, CompassRadarDial } from './MicroGauge';
 import { StxHologram } from './StxHologram';
 
 interface CenterCarouselProps {
@@ -37,11 +41,12 @@ interface CenterCarouselProps {
   dialOptions: DialOption[];
   activeSubId: string;
   onSelectSubOption: (id: string, activate?: boolean) => void;
+  onLaunchApp?: (app: AppItem) => void;
   selectedApp: AppItem | null;
   apps: AppItem[];
   onToggleAppSetting: (
     appId: string,
-    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync'
+    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync' | 'batteryOpt'
   ) => void;
   onClearAppCache: (appId: string) => void;
   toggles: QuickToggles;
@@ -54,8 +59,10 @@ interface CenterCarouselProps {
   onSendStxCommand: (cmd: string) => void;
   voiceActive: boolean;
   onToggleVoice: () => void;
-  batteryPct: number;
-  memPct: number;
+  telemetry: DeviceTelemetry;
+  onEnableSensors: () => Promise<boolean>;
+  onResetSteps: () => void;
+  onScanBluetooth: () => Promise<string | null>;
   cameraMode: 'OPTICAL' | 'THERMAL' | 'NIGHT';
   cameraZoom: number;
   liveCameraEnabled: boolean;
@@ -132,7 +139,6 @@ const LiveEcgStrip: React.FC<{ bpm?: number }> = memo(({ bpm = 72 }) => {
         else ctx.lineTo(x, y);
       }
 
-      // Fast two-pass glow (zero shadowBlur lag)
       ctx.strokeStyle = 'rgba(255, 42, 75, 0.28)';
       ctx.lineWidth = 4.5;
       ctx.stroke();
@@ -163,11 +169,17 @@ function getCircularOffset(index: number, activeIndex: number, total: number) {
   return diff;
 }
 
+function getHeadingDir(deg: number) {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+  return dirs[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
 export const CenterCarousel: React.FC<CenterCarouselProps> = ({
   activeWedge,
   dialOptions,
   activeSubId,
   onSelectSubOption,
+  onLaunchApp,
   selectedApp,
   apps,
   onToggleAppSetting,
@@ -182,8 +194,10 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
   onSendStxCommand,
   voiceActive,
   onToggleVoice,
-  batteryPct,
-  memPct,
+  telemetry,
+  onEnableSensors,
+  onResetSteps,
+  onScanBluetooth,
   cameraMode,
   cameraZoom,
   liveCameraEnabled,
@@ -256,7 +270,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
   };
 
   const renderCardContent = (opt: DialOption, isFront: boolean) => {
-    // A. DEEP APP SETTINGS (Level 2 inside APPS)
+    // A. LEVEL-3 DEEP APP SETTINGS DIAL ("dial inside dial inside dial")
     if (activeWedge === 'APPS' && selectedApp) {
       const liveApp = apps.find((a) => a.id === selectedApp.id) ?? selectedApp;
       return (
@@ -264,28 +278,35 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
           <div className="flex items-start justify-between border-b border-[#00F0FF]/15 pb-1.5 sm:pb-2 shrink-0 gap-2">
             <div className="min-w-0">
               <div className="font-mono-hud text-[9px] tracking-[0.16em] text-[#00F0FF]/80 truncate">
-                {liveApp.packageId}
+                {liveApp.packageId} · v{liveApp.version ?? '1.0'}
               </div>
-              <h3 className="font-display text-sm sm:text-xl font-bold tracking-[0.1em] text-[#E6F8FF] text-glow-cyan mt-0.5 truncate">
+              <h3 className="font-display text-sm sm:text-lg font-bold tracking-[0.1em] text-[#E6F8FF] text-glow-cyan mt-0.5 truncate">
                 {liveApp.name} // {opt.label}
               </h3>
             </div>
-            <span className="font-mono-hud text-[9px] sm:text-[10px] px-1.5 sm:px-2 py-0.5 border border-[#00F0FF]/45 text-[#00F0FF] shrink-0">
-              {liveApp.status}
-            </span>
+            {onLaunchApp && (
+              <button
+                type="button"
+                onClick={() => onLaunchApp(liveApp)}
+                className="flex items-center gap-1 px-2.5 py-1 border border-[#00F0FF] bg-[#00F0FF]/18 hover:bg-[#00F0FF]/35 font-mono-hud text-[9px] text-white shrink-0 cursor-pointer"
+              >
+                <ExternalLink className="w-3 h-3" />
+                <span>OPEN POPUP</span>
+              </button>
+            )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2.5 flex-1 content-center">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 flex-1 content-center">
             <button
               type="button"
               onClick={() => onToggleAppSetting(liveApp.id, 'pinnedToDock')}
-              className={`flex items-center justify-between px-2.5 py-2 sm:px-3 sm:py-2.5 border text-left cursor-pointer ${
+              className={`flex items-center justify-between px-2.5 py-2 border text-left cursor-pointer ${
                 liveApp.pinnedToDock
                   ? 'border-[#00F0FF] bg-[#00F0FF]/14 text-[#E6F8FF]'
                   : 'border-[#00F0FF]/20 bg-[#050910] text-[#E6F8FF]/60'
               }`}
             >
-              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px] sm:text-[10px]">
+              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px]">
                 <Pin className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
                 PIN ARC DOCK
               </span>
@@ -297,13 +318,13 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
             <button
               type="button"
               onClick={() => onToggleAppSetting(liveApp.id, 'notificationsEnabled')}
-              className={`flex items-center justify-between px-2.5 py-2 sm:px-3 sm:py-2.5 border text-left cursor-pointer ${
+              className={`flex items-center justify-between px-2.5 py-2 border text-left cursor-pointer ${
                 liveApp.notificationsEnabled
                   ? 'border-[#00F0FF] bg-[#00F0FF]/14 text-[#E6F8FF]'
                   : 'border-[#00F0FF]/20 bg-[#050910] text-[#E6F8FF]/60'
               }`}
             >
-              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px] sm:text-[10px]">
+              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px]">
                 <Bell className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
                 ALERTS
               </span>
@@ -315,13 +336,13 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
             <button
               type="button"
               onClick={() => onToggleAppSetting(liveApp.id, 'backgroundSync')}
-              className={`flex items-center justify-between px-2.5 py-2 sm:px-3 sm:py-2.5 border text-left cursor-pointer ${
+              className={`flex items-center justify-between px-2.5 py-2 border text-left cursor-pointer ${
                 liveApp.backgroundSync
                   ? 'border-[#00F0FF] bg-[#00F0FF]/14 text-[#E6F8FF]'
                   : 'border-[#00F0FF]/20 bg-[#050910] text-[#E6F8FF]/60'
               }`}
             >
-              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px] sm:text-[10px]">
+              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px]">
                 <RefreshCw className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
                 BG SYNC
               </span>
@@ -332,90 +353,130 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
 
             <button
               type="button"
+              onClick={() => onToggleAppSetting(liveApp.id, 'batteryOpt')}
+              className={`flex items-center justify-between px-2.5 py-2 border text-left cursor-pointer ${
+                liveApp.batteryOpt === 'UNRESTRICTED'
+                  ? 'border-[#00F0FF] bg-[#00F0FF]/14 text-[#E6F8FF]'
+                  : 'border-[#00F0FF]/20 bg-[#050910] text-[#E6F8FF]/70'
+              }`}
+            >
+              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px]">
+                <BatteryCharging className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
+                BATT MODE
+              </span>
+              <span className="font-mono-hud text-[8.5px] font-bold">
+                {liveApp.batteryOpt ?? 'OPTIMIZED'}
+              </span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 onClearAppCache(liveApp.id);
-                setCacheToast('CACHE PURGED · 0 KB');
+                setCacheToast('CACHE PURGED · 0 MB');
                 setTimeout(() => setCacheToast(null), 2000);
               }}
-              className="flex items-center justify-between px-2.5 py-2 sm:px-3 sm:py-2.5 border border-[#FF2A4B]/45 bg-[#FF2A4B]/10 hover:bg-[#FF2A4B]/20 text-[#FFE5EA] cursor-pointer"
+              className="sm:col-span-2 flex items-center justify-between px-2.5 py-2 border border-[#FF2A4B]/45 bg-[#FF2A4B]/10 hover:bg-[#FF2A4B]/20 text-[#FFE5EA] cursor-pointer"
             >
-              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px] sm:text-[10px]">
+              <span className="flex items-center gap-1.5 font-mono-hud text-[9.5px]">
                 <Trash2 className="w-3.5 h-3.5 text-[#FF2A4B] shrink-0" />
-                CLEAR CACHE
+                CLEAR APP CACHE ({liveApp.storageMb ?? 24} MB)
               </span>
-              <span className="font-mono-hud text-[9.5px] text-[#FF2A4B]">EXEC</span>
+              <span className="font-mono-hud text-[9.5px] text-[#FF2A4B]">
+                {cacheToast ?? 'PURGE'}
+              </span>
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-2 pt-1.5 sm:pt-2 border-t border-[#00F0FF]/15 font-mono-hud text-[9px] sm:text-[9.5px] text-[#E6F8FF]/70 shrink-0">
+          <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-[#00F0FF]/15 font-mono-hud text-[9px] text-[#E6F8FF]/70 shrink-0">
             <span className="truncate">PERMS: {liveApp.permissions}</span>
             <button
               type="button"
               onClick={() => onSelectSubOption(opt.id, true)}
               className="px-2.5 py-1 border border-[#00F0FF]/60 bg-[#00F0FF]/15 text-[#E6F8FF] hover:bg-[#00F0FF]/30 cursor-pointer shrink-0"
             >
-              {cacheToast ?? `RUN: ${opt.label}`}
+              EXEC: {opt.label}
             </button>
           </div>
         </div>
       );
     }
 
-    // B. APPS CAROUSEL CARDS
+    // B. ANDROID APPS CAROUSEL CARDS (Click app to open Windowed Popup, or click IN-APP DIAL for Level 3!)
     if (activeWedge === 'APPS') {
       const app = apps.find((a) => a.id === opt.id) ?? apps[0];
       return (
         <div className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5">
           <div className="flex items-start justify-between border-b border-[#00F0FF]/15 pb-1.5 sm:pb-2 gap-2 shrink-0">
-            <div className="min-w-0">
-              <div className="font-mono-hud text-[8.5px] sm:text-[9px] tracking-[0.18em] text-[#00F0FF]/75 truncate">
-                {app.category} · {app.packageId}
-              </div>
-              <h3 className="font-display text-base sm:text-xl font-bold tracking-[0.12em] text-[#E6F8FF] text-glow-cyan mt-0.5 truncate">
-                {app.name}
-              </h3>
-            </div>
             <button
               type="button"
-              onClick={() => onSelectSubOption(app.id, true)}
-              className="flex items-center gap-1 px-2 sm:px-2.5 py-1 border border-[#00F0FF] bg-[#00F0FF]/15 hover:bg-[#00F0FF]/30 font-mono-hud text-[9px] sm:text-[9.5px] tracking-wider text-[#E6F8FF] cursor-pointer shrink-0"
+              onClick={() => (onLaunchApp ? onLaunchApp(app) : onSelectSubOption(app.id, true))}
+              className="min-w-0 text-left group cursor-pointer"
             >
-              <Sliders className="w-3 h-3" />
-              <span>IN-APP</span>
-              <ChevronRight className="w-3 h-3" />
+              <div className="font-mono-hud text-[8.5px] sm:text-[9px] tracking-[0.16em] text-[#00F0FF]/75 truncate">
+                {app.category} · {app.packageId}
+              </div>
+              <h3 className="font-display text-base sm:text-xl font-bold tracking-[0.12em] text-[#E6F8FF] group-hover:text-[#00F0FF] text-glow-cyan mt-0.5 truncate transition-colors">
+                {app.name}
+              </h3>
             </button>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              {onLaunchApp && (
+                <button
+                  type="button"
+                  onClick={() => onLaunchApp(app)}
+                  className="flex items-center gap-1 px-2.5 py-1 border border-[#00F0FF] bg-[#00F0FF]/20 hover:bg-[#00F0FF]/35 font-mono-hud text-[9px] tracking-wider text-white cursor-pointer"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  <span>OPEN</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onSelectSubOption(app.id, true)}
+                className="flex items-center gap-1 px-2 py-1 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[9px] tracking-wider text-[#9FEFFF] cursor-pointer"
+                title="App Deep Settings Dial"
+              >
+                <Sliders className="w-3 h-3" />
+                <span className="hidden sm:inline">DIAL</span>
+              </button>
+            </div>
           </div>
 
-          <div className="space-y-1.5 sm:space-y-2 flex-1 flex flex-col justify-center">
-            <div className="flex items-center justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+          <div className="space-y-1.5 flex-1 flex flex-col justify-center">
+            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
               <span className="text-[#E6F8FF]/55">STATE</span>
               <span className="text-[#00F0FF] font-bold">{app.status}</span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
               <span className="text-[#E6F8FF]/55 shrink-0">PERMISSIONS</span>
               <span className="text-[#E6F8FF] truncate">{app.permissions}</span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
-              <span className="text-[#E6F8FF]/55">ARC DOCK PIN</span>
-              <button
-                type="button"
-                onClick={() => onToggleAppSetting(app.id, 'pinnedToDock')}
-                className={`px-2 py-0.5 border text-[9px] cursor-pointer ${
-                  app.pinnedToDock
-                    ? 'border-[#00F0FF] text-[#00F0FF] bg-[#00F0FF]/10'
-                    : 'border-[#E6F8FF]/25 text-[#E6F8FF]/55'
-                }`}
-              >
-                {app.pinnedToDock ? 'PINNED' : 'UNPINNED'}
-              </button>
+            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+              <span className="text-[#E6F8FF]/55">BATTERY / STORAGE</span>
+              <span className="text-[#9FEFFF]">
+                {app.batteryOpt ?? 'OPTIMIZED'} · {app.storageMb ?? 24} MB
+              </span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] sm:text-[10.5px] gap-2">
-              <span className="text-[#E6F8FF]/55">ALERTS / SYNC</span>
+            <div className="flex items-center justify-between font-mono-hud text-[10px] gap-2">
+              <span className="text-[#E6F8FF]/55">QUICK CONTROLS</span>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
+                  onClick={() => onToggleAppSetting(app.id, 'pinnedToDock')}
+                  className={`px-2 py-0.5 border text-[8.5px] cursor-pointer ${
+                    app.pinnedToDock
+                      ? 'border-[#00F0FF] text-[#00F0FF] bg-[#00F0FF]/10'
+                      : 'border-[#E6F8FF]/25 text-[#E6F8FF]/55'
+                  }`}
+                >
+                  {app.pinnedToDock ? 'PINNED' : 'PIN'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => onToggleAppSetting(app.id, 'notificationsEnabled')}
-                  className={`px-2 py-0.5 border text-[9px] cursor-pointer ${
+                  className={`px-2 py-0.5 border text-[8.5px] cursor-pointer ${
                     app.notificationsEnabled
                       ? 'border-[#00F0FF]/60 text-[#E6F8FF]'
                       : 'border-[#FF2A4B]/50 text-[#FF2A4B]'
@@ -423,44 +484,169 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
                 >
                   {app.notificationsEnabled ? 'ALERTS ON' : 'MUTED'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onToggleAppSetting(app.id, 'backgroundSync')}
-                  className={`px-2 py-0.5 border text-[9px] cursor-pointer ${
-                    app.backgroundSync
-                      ? 'border-[#00F0FF]/60 text-[#00F0FF]'
-                      : 'border-[#E6F8FF]/20 text-[#E6F8FF]/45'
-                  }`}
-                >
-                  {app.backgroundSync ? 'SYNC' : 'IDLE'}
-                </button>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1.5 sm:pt-2 border-t border-[#00F0FF]/15 shrink-0 gap-2">
+          <div className="flex items-center justify-between pt-1.5 border-t border-[#00F0FF]/15 shrink-0 gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <Grid className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
-              <span className="font-mono-hud text-[8.5px] sm:text-[9px] text-[#E6F8FF]/65 truncate">
-                SWIPE OR ROTATE DIAL
+              <span className="font-mono-hud text-[8.5px] text-[#E6F8FF]/65 truncate">
+                TAP OPEN FOR WINDOWED APP
               </span>
             </div>
-            {app.targetWedge && (
-              <button
-                type="button"
-                onClick={() => onSelectSubOption(app.id, true)}
-                className="font-mono-hud text-[9px] sm:text-[9.5px] text-[#FF2A4B] font-bold hover:underline cursor-pointer shrink-0"
-              >
-                CONFIGURE →
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => onSelectSubOption(app.id, true)}
+              className="font-mono-hud text-[9px] text-[#FF2A4B] font-bold hover:underline cursor-pointer shrink-0"
+            >
+              APP SETTINGS →
+            </button>
           </div>
         </div>
       );
     }
 
-    // C. HEALTH CAROUSEL CARDS
+    // C. HEALTH & REAL MOBILE SENSOR CARDS
     if (activeWedge === 'HEALTH') {
+      if (opt.id === 'h-steps') {
+        const distKm = (telemetry.steps * 0.00075).toFixed(2);
+        const kcal = Math.round(telemetry.steps * 0.042);
+        const goalPct = Math.min(100, Math.round((telemetry.steps / 10000) * 100));
+        return (
+          <div className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5">
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <Activity className="w-4 h-4 text-[#00F0FF] shrink-0" />
+                <span className="font-display text-sm sm:text-base font-bold tracking-[0.12em] text-[#E6F8FF] truncate">
+                  REAL PEDOMETER
+                </span>
+              </div>
+              <div className="flex items-baseline gap-1 shrink-0">
+                <span className="font-mono-hud text-xl sm:text-2xl font-bold text-[#E6F8FF] tabular-nums">
+                  {telemetry.steps.toLocaleString()}
+                </span>
+                <span className="font-mono-hud text-[9px] text-[#00F0FF]">STEPS</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 font-mono-hud text-[9px] text-[#E6F8FF]/70">
+              <span>
+                {telemetry.stepActive
+                  ? 'ACCELEROMETER LIVE'
+                  : telemetry.sensorNeedsPermission
+                    ? 'TAP ENABLE FOR MOBILE SENSORS'
+                    : 'MOBILE MOTION READY'}
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onEnableSensors()}
+                  className="px-2 py-0.5 border border-[#00F0FF]/55 text-[#00F0FF] cursor-pointer"
+                >
+                  CALIBRATE
+                </button>
+                <button
+                  type="button"
+                  onClick={onResetSteps}
+                  className="px-2 py-0.5 border border-[#FF2A4B]/50 text-[#FFB4C0] cursor-pointer"
+                >
+                  RESET
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex justify-between font-mono-hud text-[8.5px] text-[#00F0FF]">
+                <span>DAILY 10K GOAL</span>
+                <span>{goalPct}%</span>
+              </div>
+              <div className="h-2 bg-[#071620] border border-[#00F0FF]/25 overflow-hidden">
+                <div className="h-full bg-[#00F0FF]" style={{ width: `${goalPct}%` }} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-0.5 shrink-0">
+              <div className="border-l border-[#00F0FF]/25 pl-2">
+                <div className="font-mono-hud text-[8px] text-[#E6F8FF]/50">DISTANCE</div>
+                <div className="font-mono-hud text-[11px] font-bold text-[#E6F8FF]">{distKm} KM</div>
+              </div>
+              <div className="border-l border-[#00F0FF]/25 pl-2">
+                <div className="font-mono-hud text-[8px] text-[#E6F8FF]/50">CALORIES</div>
+                <div className="font-mono-hud text-[11px] font-bold text-[#E6F8FF]">{kcal} KCAL</div>
+              </div>
+              <div className="border-l border-[#00F0FF]/25 pl-2">
+                <div className="font-mono-hud text-[8px] text-[#E6F8FF]/50">ACCEL FORCE</div>
+                <div className="font-mono-hud text-[11px] font-bold text-[#00F0FF]">
+                  {telemetry.accelMag} m/s²
+                </div>
+              </div>
+              <div className="border-l border-[#00F0FF]/25 pl-2">
+                <div className="font-mono-hud text-[8px] text-[#E6F8FF]/50">BATTERY</div>
+                <div className="font-mono-hud text-[11px] font-bold text-[#E6F8FF]">
+                  {telemetry.batteryPct}%
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      if (opt.id === 'h-gyro') {
+        return (
+          <div className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5">
+            <div className="flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-1.5">
+                <Compass className="w-4 h-4 text-[#00F0FF]" />
+                <span className="font-display text-sm sm:text-base font-bold tracking-[0.12em] text-white">
+                  GYRO & COMPASS
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onEnableSensors()}
+                className="px-2 py-0.5 border border-[#00F0FF]/55 font-mono-hud text-[9px] text-[#00F0FF] cursor-pointer"
+              >
+                {telemetry.gyroActive ? 'LIVE GYRO' : 'ENABLE GYRO'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-around py-1">
+              <CompassRadarDial headingDeg={telemetry.headingDeg} size={74} />
+              <div className="flex flex-col items-center gap-1">
+                <div className="relative w-20 h-20 rounded-full border border-[#00F0FF]/50 overflow-hidden flex items-center justify-center bg-[#020408]">
+                  <div
+                    className="w-24 h-[2px] bg-[#00F0FF] transition-transform duration-100"
+                    style={{
+                      transform: `translateY(${Math.max(-24, Math.min(24, telemetry.pitchDeg))}px) rotate(${-telemetry.rollDeg}deg)`,
+                    }}
+                  />
+                  <div className="absolute w-2.5 h-2.5 rounded-full border border-[#FF2A4B]" />
+                </div>
+                <span className="font-mono-hud text-[8.5px] text-[#9FEFFF]">HORIZON</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 pt-1 border-t border-[#00F0FF]/15 font-mono-hud">
+              <div>
+                <div className="text-[8px] text-[#E6F8FF]/50">HEADING</div>
+                <div className="text-xs font-bold text-white">
+                  {getHeadingDir(telemetry.headingDeg)} {telemetry.headingDeg}°
+                </div>
+              </div>
+              <div>
+                <div className="text-[8px] text-[#E6F8FF]/50">PITCH</div>
+                <div className="text-xs font-bold text-[#00F0FF]">{telemetry.pitchDeg}°</div>
+              </div>
+              <div>
+                <div className="text-[8px] text-[#E6F8FF]/50">ROLL</div>
+                <div className="text-xs font-bold text-[#FF2A4B]">{telemetry.rollDeg}°</div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
       const metricMap: Record<
         string,
         { val: string; unit: string; sub: string; bpm: number; rows: [string, string][] }
@@ -472,9 +658,9 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
           bpm: 72,
           rows: [
             ['HRV', '68 ms'],
-            ['RESTING', '58 BPM'],
+            ['STEPS', `${telemetry.steps}`],
             ['SPO2', '99%'],
-            ['VO2 MAX', '54.2'],
+            ['PWR', `${telemetry.batteryPct}%`],
           ],
         },
         'h-hrv': {
@@ -501,40 +687,16 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
             ['SCORE', '91 / 100'],
           ],
         },
-        'h-steps': {
-          val: '8,412',
-          unit: 'STEPS',
-          sub: '6.3 KM · 412 KCAL ACTIVE',
-          bpm: 94,
-          rows: [
-            ['CADENCE', '114 SPM'],
-            ['ELEVATION', '42 M'],
-            ['PACE', '5:18 /KM'],
-            ['GOAL', '84%'],
-          ],
-        },
         'h-spo2': {
           val: '99',
           unit: '%',
           sub: 'BLOOD OXYGEN SATURATION',
           bpm: 68,
           rows: [
-            ['ALTITUDE', '18 M'],
+            ['STEPS', `${telemetry.steps}`],
             ['RESP RATE', '14 /MIN'],
             ['PERFUSION', '4.2%'],
             ['STATUS', 'OPTIMAL'],
-          ],
-        },
-        'h-vo2': {
-          val: '54.2',
-          unit: 'ML/KG',
-          sub: 'CARDIOVASCULAR CAPACITY',
-          bpm: 82,
-          rows: [
-            ['AEROBIC', 'PEAK'],
-            ['THRESHOLD', '168 BPM'],
-            ['CORE PWR', `${batteryPct}%`],
-            ['MEM', `${memPct}%`],
           ],
         },
       };
@@ -585,8 +747,51 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
       );
     }
 
-    // D. WIFI CAROUSEL CARDS
+    // D. WIFI & BLUETOOTH CAROUSEL CARDS (Real Network + Web Bluetooth)
     if (activeWedge === 'WIFI') {
+      if (opt.id === 'w-bluetooth') {
+        return (
+          <div className="flex flex-col justify-between h-full gap-2.5 overflow-y-auto hud-scroll">
+            <div className="flex items-center justify-between border-b border-[#00F0FF]/15 pb-2 gap-2">
+              <div>
+                <h3 className="font-display text-base sm:text-lg font-bold tracking-[0.12em] text-white">
+                  BLUETOOTH RADIO
+                </h3>
+                <p className="font-mono-hud text-[9px] text-[#00F0FF]">{telemetry.btStatus}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onToggleControl('bluetooth')}
+                className={`flex items-center gap-1.5 px-2.5 py-1 border font-mono-hud text-[9.5px] cursor-pointer ${
+                  toggles.bluetooth
+                    ? 'border-[#00F0FF] bg-[#00F0FF]/15 text-white'
+                    : 'border-[#FF2A4B] bg-[#FF2A4B]/15 text-[#FF2A4B]'
+                }`}
+              >
+                <Bluetooth className="w-3.5 h-3.5" />
+                <span>{toggles.bluetooth ? 'BT ON' : 'BT OFF'}</span>
+              </button>
+            </div>
+
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 border border-[#00F0FF]/20 bg-[#03060B] p-4 text-center">
+              <Bluetooth className="w-8 h-8 text-[#00F0FF]" />
+              <div className="font-mono-hud text-xs text-white">
+                {telemetry.btDeviceName
+                  ? `ACTIVE LINK: ${telemetry.btDeviceName}`
+                  : 'WEB BLUETOOTH READY FOR NEARBY PAIRING'}
+              </div>
+              <button
+                type="button"
+                onClick={() => onScanBluetooth()}
+                className="px-4 py-2 border border-[#00F0FF] bg-[#00F0FF]/20 hover:bg-[#00F0FF]/35 font-mono-hud text-[10px] tracking-widest text-white cursor-pointer"
+              >
+                {telemetry.btScanning ? 'SCANNING...' : 'SCAN & PAIR DEVICE'}
+              </button>
+            </div>
+          </div>
+        );
+      }
+
       return (
         <div className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5">
           <div className="flex items-center justify-between border-b border-[#00F0FF]/15 pb-1.5 sm:pb-2 gap-2 shrink-0">
@@ -595,57 +800,63 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
                 WIFI // {opt.label}
               </h3>
               <p className="font-mono-hud text-[9px] sm:text-[9.5px] text-[#00F0FF]/80 truncate">
-                {toggles.wifi
-                  ? `${connectedWifi.ssid} · ${connectedWifi.band} · ${connectedWifi.latencyMs}ms`
-                  : 'RF TRANSCEIVER DISABLED'}
+                {toggles.wifi && telemetry.online
+                  ? `${telemetry.netType} · ${telemetry.downlinkMbps} Mbps · ${telemetry.rttMs}ms`
+                  : 'RF LINK OFFLINE'}
               </p>
             </div>
             <button
               type="button"
               onClick={() => onToggleControl('wifi')}
               className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 border font-mono-hud text-[9px] sm:text-[9.5px] tracking-widest cursor-pointer shrink-0 ${
-                toggles.wifi
+                toggles.wifi && telemetry.online
                   ? 'border-[#00F0FF] bg-[#00F0FF]/15 text-[#E6F8FF]'
                   : 'border-[#FF2A4B] bg-[#FF2A4B]/15 text-[#FF2A4B]'
               }`}
             >
-              {toggles.wifi ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-              <span>{toggles.wifi ? 'LINK UP' : 'OFFLINE'}</span>
+              {toggles.wifi && telemetry.online ? (
+                <Wifi className="w-3 h-3" />
+              ) : (
+                <WifiOff className="w-3 h-3" />
+              )}
+              <span>{toggles.wifi && telemetry.online ? 'ONLINE' : 'OFFLINE'}</span>
             </button>
           </div>
 
           {opt.id === 'w-overview' || opt.id === 'w-band' || opt.id === 'w-toggle' ? (
             <>
               <div className="space-y-1.5 sm:space-y-2 flex-1 flex flex-col justify-center">
-                <div className="flex justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
-                  <span className="text-[#E6F8FF]/55">SSID</span>
-                  <span className="text-[#E6F8FF] font-bold truncate">{connectedWifi.ssid}</span>
+                <div className="flex justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+                  <span className="text-[#E6F8FF]/55">DEVICE LINK</span>
+                  <span className="text-[#E6F8FF] font-bold truncate">
+                    {telemetry.online ? `${telemetry.netType} (${connectedWifi.ssid})` : 'DISCONNECTED'}
+                  </span>
                 </div>
-                <div className="flex justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
-                  <span className="text-[#E6F8FF]/55">IPv4 ADDRESS</span>
-                  <span className="text-[#00F0FF]">10.42.0.18</span>
+                <div className="flex justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+                  <span className="text-[#E6F8FF]/55">DOWNLINK SPEED</span>
+                  <span className="text-[#00F0FF]">{telemetry.downlinkMbps} MBPS</span>
                 </div>
-                <div className="flex justify-between font-mono-hud text-[10px] sm:text-[10.5px] border-b border-[#00F0FF]/10 pb-1 gap-2">
-                  <span className="text-[#E6F8FF]/55">THROUGHPUT</span>
-                  <span className="text-[#E6F8FF]">2.4 GBPS · {connectedWifi.band}</span>
+                <div className="flex justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+                  <span className="text-[#E6F8FF]/55">LATENCY (RTT)</span>
+                  <span className="text-[#E6F8FF]">{telemetry.rttMs} MS</span>
                 </div>
-                <div className="flex justify-between font-mono-hud text-[10px] sm:text-[10.5px] gap-2">
-                  <span className="text-[#E6F8FF]/55">SECURITY</span>
-                  <span className="text-[#00F0FF]">{connectedWifi.security}</span>
+                <div className="flex justify-between font-mono-hud text-[10px] gap-2">
+                  <span className="text-[#E6F8FF]/55">BLUETOOTH</span>
+                  <span className="text-[#00F0FF] truncate">{telemetry.btStatus}</span>
                 </div>
               </div>
 
               <div className="flex items-center justify-around pt-1 border-t border-[#00F0FF]/15 shrink-0">
                 <CircularMicroGauge
-                  value={toggles.wifi ? connectedWifi.signal : 0}
-                  label={toggles.wifi ? `${connectedWifi.signal}%` : 'OFF'}
+                  value={toggles.wifi && telemetry.online ? connectedWifi.signal : 0}
+                  label={toggles.wifi && telemetry.online ? `${connectedWifi.signal}%` : 'OFF'}
                   subLabel="SIGNAL"
-                  accent={toggles.wifi ? 'cyan' : 'crimson'}
+                  accent={toggles.wifi && telemetry.online ? 'cyan' : 'crimson'}
                   size={56}
                 />
                 <CircularMicroGauge
-                  value={toggles.wifi ? 92 : 0}
-                  label={toggles.wifi ? `${connectedWifi.latencyMs}ms` : '--'}
+                  value={toggles.wifi && telemetry.online ? Math.max(10, 100 - telemetry.rttMs) : 0}
+                  label={toggles.wifi && telemetry.online ? `${telemetry.rttMs}ms` : '--'}
                   subLabel="PING"
                   accent="crimson"
                   size={56}
@@ -744,8 +955,8 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
               <div className="font-display text-xl sm:text-2xl font-bold text-[#E6F8FF]">31°C</div>
             </div>
             <div className="font-mono-hud text-[9px] sm:text-[9.5px] text-right text-[#E6F8FF]/65">
-              <div>WIND 12 KT WNW</div>
-              <div>BARO 1016 HPA</div>
+              <div>STEPS: {telemetry.steps.toLocaleString()}</div>
+              <div>DIR: {getHeadingDir(telemetry.headingDeg)} {telemetry.headingDeg}°</div>
             </div>
           </div>
 
@@ -905,7 +1116,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="SEARCH APPS & PACKAGES..."
+            placeholder="SEARCH ANDROID APPS..."
             className="w-full pl-8 pr-3 py-1.5 sm:py-2 bg-[#03060B] border border-[#00F0FF]/40 focus:border-[#00F0FF] outline-none font-mono-hud text-[11px] sm:text-xs text-[#E6F8FF]"
           />
         </div>
@@ -914,7 +1125,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
             <button
               key={app.id}
               type="button"
-              onClick={() => onSelectSubOption(app.id, true)}
+              onClick={() => (onLaunchApp ? onLaunchApp(app) : onSelectSubOption(app.id, true))}
               className="w-full flex items-center justify-between px-2.5 sm:px-3 py-2 border border-[#00F0FF]/20 hover:border-[#00F0FF]/65 text-left cursor-pointer gap-2"
             >
               <span className="font-display text-xs text-[#E6F8FF] truncate">{app.name}</span>
@@ -983,13 +1194,11 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
                 : 'border-[#00F0FF]/20 cursor-pointer pointer-events-auto'
             }`}
           >
-            {/* Corner Brackets */}
             <span className="pointer-events-none absolute top-0 left-0 w-2.5 h-2.5 border-t border-l border-[#00F0FF]" />
             <span className="pointer-events-none absolute top-0 right-0 w-2.5 h-2.5 border-t border-r border-[#00F0FF]" />
             <span className="pointer-events-none absolute bottom-0 left-0 w-2.5 h-2.5 border-b border-l border-[#FF2A4B]" />
             <span className="pointer-events-none absolute bottom-0 right-0 w-2.5 h-2.5 border-b border-r border-[#00F0FF]" />
 
-            {/* Card Top Index + LIVE Badge */}
             <div className="flex items-center justify-between mb-1.5 sm:mb-2 shrink-0 gap-2">
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <span className="font-mono-hud text-xs sm:text-sm font-bold text-[#E6F8FF] shrink-0">
@@ -1011,7 +1220,6 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
               </div>
             </div>
 
-            {/* Persistent Card Content */}
             <div className={`flex-1 min-h-0 ${!isFront ? 'pointer-events-none select-none' : ''}`}>
               {renderCardContent(opt, isFront)}
             </div>

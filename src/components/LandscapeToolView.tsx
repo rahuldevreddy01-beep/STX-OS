@@ -4,6 +4,7 @@ import { ChevronLeft, SkipBack, SkipForward } from 'lucide-react';
 import {
   AppItem,
   BriefingEntry,
+  DeviceTelemetry,
   DialOption,
   QuickToggles,
   StxLogEntry,
@@ -17,18 +18,18 @@ import { TimelineRuler } from './TimelineRuler';
 
 interface LandscapeToolViewProps {
   now: Date;
-  batteryPct: number;
-  memPct: number;
+  telemetry: DeviceTelemetry;
   activeWedge: WedgeId;
   dialOptions: DialOption[];
   activeSubId: string;
   onSelectSubOption: (id: string, activate?: boolean) => void;
+  onLaunchApp: (app: AppItem) => void;
   onStepBackLevel: () => void;
   selectedApp: AppItem | null;
   apps: AppItem[];
   onToggleAppSetting: (
     appId: string,
-    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync'
+    field: 'pinnedToDock' | 'notificationsEnabled' | 'backgroundSync' | 'batteryOpt'
   ) => void;
   onClearAppCache: (appId: string) => void;
   toggles: QuickToggles;
@@ -42,6 +43,9 @@ interface LandscapeToolViewProps {
   onStepTrack: (dir: -1 | 1) => void;
   voiceActive: boolean;
   onToggleVoice: () => void;
+  onEnableSensors: () => Promise<boolean>;
+  onResetSteps: () => void;
+  onScanBluetooth: () => Promise<string | null>;
   cameraMode: 'OPTICAL' | 'THERMAL' | 'NIGHT';
   cameraZoom: number;
   liveCameraEnabled: boolean;
@@ -52,12 +56,12 @@ interface LandscapeToolViewProps {
 
 export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
   now,
-  batteryPct,
-  memPct,
+  telemetry,
   activeWedge,
   dialOptions,
   activeSubId,
   onSelectSubOption,
+  onLaunchApp,
   onStepBackLevel,
   selectedApp,
   apps,
@@ -74,6 +78,9 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
   onStepTrack,
   voiceActive,
   onToggleVoice,
+  onEnableSensors,
+  onResetSteps,
+  onScanBluetooth,
   cameraMode,
   cameraZoom,
   liveCameraEnabled,
@@ -129,7 +136,9 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
         <div className="flex items-center gap-1.5 font-mono-hud text-[9.5px] sm:text-[10px] tracking-[0.12em] text-[#E6F8FF]/85 shrink-0 pl-1">
           <span className="text-[#00F0FF] font-bold">{timeStr}</span>
           <span className="hidden sm:inline">·</span>
-          <span className="hidden sm:inline">{batteryPct}%</span>
+          <span className="hidden sm:inline">
+            {telemetry.batteryPct}%{telemetry.isCharging ? '⚡' : ''}
+          </span>
         </div>
       </div>
 
@@ -141,7 +150,7 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
         <motion.div
           initial={{ opacity: 0, x: -16 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ duration: 0.22, ease: 'easeOut' }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           className="flex-1 min-w-0 flex flex-col min-h-0"
         >
           <div className="flex-1 min-h-0">
@@ -150,6 +159,7 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
               dialOptions={dialOptions}
               activeSubId={activeSubId}
               onSelectSubOption={onSelectSubOption}
+              onLaunchApp={onLaunchApp}
               selectedApp={selectedApp}
               apps={apps}
               onToggleAppSetting={onToggleAppSetting}
@@ -164,8 +174,10 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
               onSendStxCommand={onSendStxCommand}
               voiceActive={voiceActive}
               onToggleVoice={onToggleVoice}
-              batteryPct={batteryPct}
-              memPct={memPct}
+              telemetry={telemetry}
+              onEnableSensors={onEnableSensors}
+              onResetSteps={onResetSteps}
+              onScanBluetooth={onScanBluetooth}
               cameraMode={cameraMode}
               cameraZoom={cameraZoom}
               liveCameraEnabled={liveCameraEnabled}
