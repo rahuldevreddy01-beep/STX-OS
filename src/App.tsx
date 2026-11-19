@@ -32,6 +32,44 @@ import {
 } from './types/hud';
 import { hudSound } from './utils/soundFx';
 
+class HudErrorBoundary extends React.Component<
+  { children: React.ReactNode; onRecover: () => void },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; onRecover: () => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-full w-full flex flex-col items-center justify-center gap-3 p-6 text-center bg-[#020306]">
+          <ShieldAlert className="w-8 h-8 text-[#FF2A4B]" />
+          <div className="font-display text-sm tracking-[0.18em] text-[#E6F8FF]">
+            HUD VIEW RECOVERY
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              this.setState({ hasError: false });
+              this.props.onRecover();
+            }}
+            className="px-4 py-2 border border-[#00F0FF] bg-[#00F0FF]/15 font-mono-hud text-xs text-[#E6F8FF] cursor-pointer"
+          >
+            RELOAD CORE VIEW
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [mode, setMode] = useState<HudMode>(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 640 && window.innerHeight > window.innerWidth) {
@@ -111,13 +149,14 @@ export default function App() {
   );
 
   useEffect(() => {
+    let orientTimer: number | null = null;
     const handleResizeOrientation = () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const nextOrient: 'portrait' | 'landscape' = h > w ? 'portrait' : 'landscape';
       if (lastOrientationRef.current !== nextOrient) {
         lastOrientationRef.current = nextOrient;
-        if (Math.min(w, h) < 640) {
+        if (Math.min(w, h) < 900) {
           setMode((prev) => {
             if (nextOrient === 'portrait' && prev === 'landscape-hub') return 'portrait';
             if (nextOrient === 'landscape' && prev === 'portrait') return 'landscape-hub';
@@ -126,8 +165,18 @@ export default function App() {
         }
       }
     };
+    const handleOrientationEvent = () => {
+      handleResizeOrientation();
+      if (orientTimer) window.clearTimeout(orientTimer);
+      orientTimer = window.setTimeout(handleResizeOrientation, 90);
+    };
     window.addEventListener('resize', handleResizeOrientation);
-    return () => window.removeEventListener('resize', handleResizeOrientation);
+    window.addEventListener('orientationchange', handleOrientationEvent);
+    return () => {
+      if (orientTimer) window.clearTimeout(orientTimer);
+      window.removeEventListener('resize', handleResizeOrientation);
+      window.removeEventListener('orientationchange', handleOrientationEvent);
+    };
   }, []);
 
   useEffect(() => {
@@ -740,13 +789,17 @@ export default function App() {
           )}
 
           <div className="relative z-20 h-full w-full">
-            <AnimatePresence mode="wait" initial={false}>
+            <HudErrorBoundary
+              onRecover={() => {
+                const isPort = typeof window !== 'undefined' && window.innerHeight > window.innerWidth;
+                setMode(isPort ? 'portrait' : 'landscape-hub');
+              }}
+            >
               <motion.div
                 key={mode}
-                initial={{ opacity: 0, scale: 0.988 }}
+                initial={{ opacity: 0.35, scale: 0.992 }}
                 animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.992 }}
-                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full w-full"
               >
                 {mode === 'portrait' && (
@@ -805,6 +858,8 @@ export default function App() {
                     telemetry={telemetry}
                     activeWedge={activeWedge}
                     onSelectWedge={handleSelectRootWedge}
+                    apps={apps}
+                    onLaunchApp={handleLaunchApp}
                     onOpenSettings={handleOpenSettings}
                     onEnableSensors={enableMotionSensors}
                     onScanBluetooth={scanBluetooth}
@@ -820,6 +875,7 @@ export default function App() {
                       setVoiceActive((v) => !v);
                     }}
                     pulseTrigger={pulseTrigger}
+                    notifCount={notifCount}
                   />
                 )}
 
@@ -889,7 +945,7 @@ export default function App() {
                   </div>
                 )}
               </motion.div>
-            </AnimatePresence>
+            </HudErrorBoundary>
           </div>
 
           {toggles.lock && (
