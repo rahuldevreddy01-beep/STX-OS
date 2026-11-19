@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  Bluetooth,
   Camera,
+  ChevronLeft,
+  Flashlight,
   FolderLock,
   Globe,
   Grid,
+  Lock,
+  Pause,
+  Play,
+  RefreshCw,
   Search,
   Signal,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
   Wifi,
   X,
 } from 'lucide-react';
-import { ROOT_WEDGE_OPTIONS } from '../data/hudData';
+import { AMBIENT_TRACKS, ROOT_WEDGE_OPTIONS } from '../data/hudData';
 import {
   AppItem,
   BriefingEntry,
@@ -36,6 +47,7 @@ interface PortraitViewProps {
   activeSubId: string;
   onSelectRootWedge: (wedge: WedgeId, openTool?: boolean) => void;
   onSelectSubOption: (id: string, activate?: boolean) => void;
+  onStepBackApp?: () => void;
   selectedApp: AppItem | null;
   apps: AppItem[];
   onToggleAppSetting: (
@@ -53,6 +65,10 @@ interface PortraitViewProps {
   onSendStxCommand: (cmd: string) => void;
   voiceActive: boolean;
   onToggleVoice: () => void;
+  isPlaying: boolean;
+  onTogglePlay: () => void;
+  trackIndex: number;
+  onStepTrack: (dir: -1 | 1) => void;
   cameraMode: 'OPTICAL' | 'THERMAL' | 'NIGHT';
   cameraZoom: number;
   liveCameraEnabled: boolean;
@@ -72,6 +88,7 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   activeSubId,
   onSelectRootWedge,
   onSelectSubOption,
+  onStepBackApp,
   selectedApp,
   apps,
   onToggleAppSetting,
@@ -86,6 +103,10 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   onSendStxCommand,
   voiceActive,
   onToggleVoice,
+  isPlaying,
+  onTogglePlay,
+  trackIndex,
+  onStepTrack,
   cameraMode,
   cameraZoom,
   liveCameraEnabled,
@@ -96,6 +117,21 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   const [commandInput, setCommandInput] = useState('');
   const [overlayMode, setOverlayMode] = useState<'none' | 'stx' | 'module'>('none');
   const [lastReply, setLastReply] = useState<string | null>(null);
+  const [containerHeight, setContainerHeight] = useState(720);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const update = () => setContainerHeight(el.clientHeight || 720);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const wheelSize = containerHeight < 520 ? 156 : containerHeight < 650 ? 184 : 212;
+  const gaugeSize = containerHeight < 620 ? 44 : 52;
 
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
   const dateStr = now
@@ -106,6 +142,7 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
   const lastStxMsg =
     [...stxLogs].reverse().find((l) => l.sender === 'STX')?.text ??
     'STX AI ready for voice or text command.';
+  const currentTrack = AMBIENT_TRACKS[trackIndex % AMBIENT_TRACKS.length];
 
   const handleCommandSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,13 +164,49 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
     setOverlayMode(wedge === 'STX' ? 'stx' : 'module');
   };
 
+  const activeIdx = Math.max(0, dialOptions.findIndex((o) => o.id === activeSubId)) + 1;
+  const totalCount = Math.max(1, dialOptions.length);
+  const currentOpt = dialOptions[activeIdx - 1] ?? dialOptions[0];
+
+  const stepModuleCard = (dir: -1 | 1) => {
+    const idx = Math.max(
+      0,
+      dialOptions.findIndex((o) => o.id === activeSubId)
+    );
+    const nextIdx = (idx + dir + dialOptions.length) % dialOptions.length;
+    if (dialOptions[nextIdx]) {
+      hudSound.playDetentClick();
+      onSelectSubOption(dialOptions[nextIdx].id, false);
+    }
+  };
+
+  const toggleItems: {
+    key: keyof QuickToggles;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    { key: 'wifi', label: 'WIFI', icon: <Wifi className="w-3 h-3" /> },
+    { key: 'bluetooth', label: 'BT', icon: <Bluetooth className="w-3 h-3" /> },
+    { key: 'flashlight', label: 'FLSH', icon: <Flashlight className="w-3 h-3" /> },
+    { key: 'lock', label: 'LOCK', icon: <Lock className="w-3 h-3" /> },
+    { key: 'sync', label: 'SYNC', icon: <RefreshCw className="w-3 h-3" /> },
+    {
+      key: 'mute',
+      label: 'MUTE',
+      icon: toggles.mute ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />,
+    },
+  ];
+
   return (
-    <div className="relative flex flex-col justify-between h-full w-full px-3.5 pt-2.5 pb-2 overflow-hidden">
+    <div
+      ref={rootRef}
+      className="relative flex flex-col justify-between h-full w-full px-3 pt-2 pb-1.5 overflow-y-auto hud-scroll"
+    >
       {/* 1. TOP STATUS BAR */}
-      <header className="flex items-center justify-between text-[10px] font-mono-hud tracking-widest shrink-0 z-10">
+      <header className="flex items-center justify-between text-[10px] font-mono-hud tracking-widest shrink-0 z-10 pb-1">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-[#E6F8FF]">{timeStr}</span>
-          <span className="text-[#00F0FF]/60 text-[9px]">{dateStr}</span>
+          <span className="text-[#00F0FF]/65 text-[9px]">{dateStr}</span>
         </div>
 
         <div className="flex items-center gap-2">
@@ -143,7 +216,7 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
           <button
             type="button"
             onClick={() => openModule('STX')}
-            className="px-1.5 py-0.5 border border-[#00F0FF]/50 bg-[#00F0FF]/12 text-[#00F0FF] text-[8px] font-bold tracking-[0.18em] cursor-pointer hover:bg-[#00F0FF]/25 transition-colors"
+            className="px-2 py-0.5 border border-[#00F0FF]/50 bg-[#00F0FF]/12 text-[#00F0FF] text-[8.5px] font-bold tracking-[0.16em] cursor-pointer hover:bg-[#00F0FF]/25 transition-colors"
           >
             STX AI
           </button>
@@ -151,15 +224,15 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
       </header>
 
       {/* 2. UPPER HERO — CONCENTRIC ARC REACTOR WHEEL */}
-      <section className="relative flex flex-col items-center justify-center shrink-0 my-0.5">
+      <section className="relative flex flex-col items-center justify-center shrink-0">
         <div className="relative flex items-center justify-center w-full">
-          <div className="absolute left-1 bottom-1 z-10">
+          <div className="absolute left-0.5 bottom-0.5 z-10">
             <CircularMicroGauge
               value={batteryPct}
               label={`${batteryPct}%`}
               subLabel="PWR"
               accent="cyan"
-              size={54}
+              size={gaugeSize}
             />
           </div>
 
@@ -168,35 +241,35 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
             options={ROOT_WEDGE_OPTIONS}
             activeOptionId={activeWedge}
             onSelectOption={(id) => openModule(id as WedgeId)}
-            size={218}
+            size={wheelSize}
           />
 
-          <div className="absolute right-1 bottom-1 z-10">
+          <div className="absolute right-0.5 bottom-0.5 z-10">
             <CircularMicroGauge
               value={memPct}
               label={`${memPct}%`}
               subLabel="MEM"
               accent="crimson"
-              size={54}
+              size={gaugeSize}
             />
           </div>
         </div>
 
-        <div className="w-full flex items-center justify-between px-2 pt-1 pb-1.5 border-b border-[#00F0FF]/20">
+        <div className="w-full flex items-center justify-between px-1.5 pt-1 pb-1 border-b border-[#00F0FF]/20">
           <div className="flex items-center gap-1.5 font-mono-hud">
-            <span className="text-base font-bold text-[#E6F8FF] leading-none">31°</span>
+            <span className="text-sm sm:text-base font-bold text-[#E6F8FF] leading-none">31°</span>
             <span className="text-[8px] text-[#00F0FF]/70 tracking-wider">CLEAR</span>
           </div>
 
-          <div className="flex items-center gap-1.5 font-mono-hud text-[8.5px] tracking-[0.16em] text-[#E6F8FF]/85">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#00F0FF] shadow-[0_0_6px_#00F0FF]" />
-            <span>STX AI CONNECTED • LOCAL</span>
+          <div className="flex items-center gap-1.5 font-mono-hud text-[8px] sm:text-[8.5px] tracking-[0.14em] text-[#E6F8FF]/85 truncate px-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#00F0FF] shadow-[0_0_6px_#00F0FF] shrink-0" />
+            <span className="truncate">STX AI CONNECTED</span>
           </div>
 
           <button
             type="button"
             onClick={() => openModule('BRIEF')}
-            className="flex items-center gap-1 font-mono-hud text-[10px] text-[#E6F8FF] cursor-pointer hover:text-[#00F0FF]"
+            className="flex items-center gap-1 font-mono-hud text-[10px] text-[#E6F8FF] cursor-pointer hover:text-[#00F0FF] shrink-0"
           >
             <span className="text-[8px] text-[#E6F8FF]/55 tracking-wider">ALRT</span>
             <span className="font-bold text-[#00F0FF]">{notifCount}</span>
@@ -204,54 +277,124 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
         </div>
       </section>
 
-      {/* 3. MIDDLE COMMAND & BRIEFING DECK */}
-      <section className="relative flex-1 min-h-0 flex flex-col justify-between py-1.5 px-2.5 border border-[#00F0FF]/20 bg-[#03060B]/70 backdrop-blur-sm my-1">
+      {/* 3. MIDDLE COMMAND, SYSTEM TOGGLES & BRIEFING DECK */}
+      <section className="relative flex-1 min-h-0 flex flex-col justify-between py-2 px-2.5 border border-[#00F0FF]/20 bg-[#03060B]/85 my-1.5 gap-1.5">
         <span className="pointer-events-none absolute top-0 left-0 w-2 h-2 border-t border-l border-[#00F0FF]" />
         <span className="pointer-events-none absolute top-0 right-0 w-2 h-2 border-t border-r border-[#00F0FF]" />
         <span className="pointer-events-none absolute bottom-0 left-0 w-2 h-2 border-b border-l border-[#FF2A4B]" />
         <span className="pointer-events-none absolute bottom-0 right-0 w-2 h-2 border-b border-r border-[#00F0FF]" />
 
-        <div>
-          <h1 className="font-display text-sm sm:text-base font-bold tracking-[0.08em] text-[#E6F8FF] text-glow-cyan leading-tight">
-            {greeting}, SANJU
-          </h1>
-          <p className="font-mono-hud text-[9px] tracking-[0.1em] text-[#00F0FF]/85 truncate mt-0.5">
-            {lastReply ?? tickerLine}
-          </p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="font-display text-sm font-bold tracking-[0.08em] text-[#E6F8FF] text-glow-cyan leading-tight truncate">
+              {greeting}, SANJU
+            </h1>
+            <p className="font-mono-hud text-[8.5px] tracking-[0.08em] text-[#00F0FF]/85 truncate mt-0.5">
+              {lastReply ?? tickerLine}
+            </p>
+          </div>
+          {/* Mini Audio Transport */}
+          <div className="flex items-center gap-1 border border-[#00F0FF]/25 bg-[#040A12] px-1.5 py-0.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                hudSound.playDetentClick();
+                onStepTrack(-1);
+              }}
+              aria-label="Previous track"
+              className="p-0.5 text-[#00F0FF] cursor-pointer"
+            >
+              <SkipBack className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                hudSound.playDetentClick();
+                onTogglePlay();
+              }}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              title={currentTrack.title}
+              className="p-0.5 text-[#E6F8FF] cursor-pointer"
+            >
+              {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                hudSound.playDetentClick();
+                onStepTrack(1);
+              }}
+              aria-label="Next track"
+              className="p-0.5 text-[#00F0FF] cursor-pointer"
+            >
+              <SkipForward className="w-3 h-3" />
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleCommandSubmit} className="relative flex items-center my-1">
+        <form onSubmit={handleCommandSubmit} className="relative flex items-center">
           <input
             type="text"
             value={commandInput}
             onChange={(e) => setCommandInput(e.target.value)}
             placeholder="ASK STX AI"
-            className="w-full pl-3 pr-10 py-1.5 bg-[#020408] border border-[#00F0FF]/40 focus:border-[#00F0FF] outline-none font-mono-hud text-[11px] tracking-[0.14em] text-[#E6F8FF] placeholder:text-[#E6F8FF]/55"
+            className="w-full pl-3 pr-10 py-1.5 bg-[#020408] border border-[#00F0FF]/40 focus:border-[#00F0FF] outline-none font-mono-hud text-[11px] tracking-[0.12em] text-[#E6F8FF] placeholder:text-[#E6F8FF]/55"
           />
           <button
             type="submit"
             aria-label="Open STX AI Hologram"
-            className="absolute right-1.5 w-6 h-6 rounded-full border-2 border-[#00F0FF] bg-[#00F0FF]/15 shadow-[0_0_10px_rgba(0,240,255,0.65)] flex items-center justify-center cursor-pointer hover:scale-105 transition-transform"
+            className="absolute right-1.5 w-6 h-6 rounded-full border-2 border-[#00F0FF] bg-[#00F0FF]/15 shadow-[0_0_8px_rgba(0,240,255,0.55)] flex items-center justify-center cursor-pointer"
           >
             <span className="w-2 h-2 rounded-full bg-[#E6F8FF]" />
           </button>
         </form>
 
-        <div className="space-y-1.5">
+        {/* 6-Channel Quick System Toggles */}
+        <div className="grid grid-cols-6 gap-1">
+          {toggleItems.map((item) => {
+            const active = toggles[item.key];
+            const isAlert = item.key === 'lock' || item.key === 'mute';
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onToggleControl(item.key)}
+                className={`flex flex-col items-center justify-center py-1 border font-mono-hud text-[7.5px] tracking-wider transition-colors cursor-pointer ${
+                  active
+                    ? isAlert
+                      ? 'border-[#FF2A4B] bg-[#FF2A4B]/20 text-[#FFE5EA]'
+                      : 'border-[#00F0FF] bg-[#00F0FF]/18 text-[#E6F8FF]'
+                    : 'border-[#00F0FF]/20 bg-[#050910] text-[#E6F8FF]/45'
+                }`}
+              >
+                {item.icon}
+                <span className="mt-0.5">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-1">
           <button
             type="button"
             onClick={() => openModule('BRIEF')}
-            className="w-full flex items-center justify-between text-left group cursor-pointer"
+            className="w-full flex items-center justify-between text-left group cursor-pointer gap-2"
           >
-            <div>
-              <div className="font-mono-hud text-[9.5px] font-bold tracking-[0.14em] text-[#E6F8FF] group-hover:text-[#00F0FF] transition-colors">
+            <div className="min-w-0">
+              <div className="font-mono-hud text-[9.5px] font-bold tracking-[0.12em] text-[#E6F8FF] group-hover:text-[#00F0FF] transition-colors">
                 NEXT CLEAR · {nextBrief.time}
               </div>
-              <div className="font-mono-hud text-[8.5px] text-[#E6F8FF]/60 truncate max-w-[215px]">
+              <div className="font-mono-hud text-[8.5px] text-[#E6F8FF]/60 truncate">
                 {nextBrief.title}
               </div>
             </div>
-            <span className="font-mono-hud text-[8.5px] tracking-widest text-[#00F0FF]">
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                openModule('HEALTH');
+              }}
+              className="font-mono-hud text-[8.5px] tracking-widest text-[#00F0FF] border border-[#00F0FF]/35 px-1.5 py-0.5 shrink-0"
+            >
               HEALTH
             </span>
           </button>
@@ -259,20 +402,20 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <div className="flex-1 h-1.5 bg-[#190910] overflow-hidden flex gap-0.5">
-                <div className="h-full bg-[#FF2A4B] glow-crimson" style={{ width: '78%' }} />
+                <div className="h-full bg-[#FF2A4B]" style={{ width: '78%' }} />
                 <div className="h-full bg-[#FF2A4B]/45" style={{ width: '10%' }} />
               </div>
-              <span className="font-mono-hud text-[8px] text-[#FF2A4B] w-9 text-right">
+              <span className="font-mono-hud text-[8px] text-[#FF2A4B] w-10 text-right">
                 PWR {batteryPct}
               </span>
             </div>
 
             <div className="flex items-center gap-2">
               <div className="flex-1 h-1.5 bg-[#05141C] overflow-hidden flex gap-0.5">
-                <div className="h-full bg-[#00F0FF] glow-cyan" style={{ width: '64%' }} />
+                <div className="h-full bg-[#00F0FF]" style={{ width: '64%' }} />
                 <div className="h-full bg-[#00F0FF]/40" style={{ width: '18%' }} />
               </div>
-              <span className="font-mono-hud text-[8px] text-[#00F0FF] w-9 text-right">
+              <span className="font-mono-hud text-[8px] text-[#00F0FF] w-10 text-right">
                 NET {toggles.wifi ? '96' : '00'}
               </span>
             </div>
@@ -281,7 +424,7 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
       </section>
 
       {/* 4. BOTTOM QUICK-LAUNCH ARC DOCK */}
-      <section className="relative h-[106px] shrink-0 flex flex-col items-center justify-end overflow-hidden">
+      <section className="relative h-[88px] sm:h-[98px] shrink-0 flex flex-col items-center justify-end overflow-hidden">
         <svg
           viewBox="0 0 360 110"
           className="absolute inset-0 w-full h-full pointer-events-none"
@@ -308,12 +451,12 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
           />
         </svg>
 
-        <div className="relative z-10 mb-1 flex flex-col items-center">
+        <div className="relative z-10 mb-0.5 flex flex-col items-center">
           <button
             type="button"
             onClick={() => openModule('STX')}
             aria-label="Open STX AI Hologram"
-            className="w-3.5 h-3.5 rounded-full bg-[#FF2A4B] shadow-[0_0_12px_#FF2A4B] border border-white/50 cursor-pointer hover:scale-125 transition-transform"
+            className="w-3.5 h-3.5 rounded-full bg-[#FF2A4B] shadow-[0_0_10px_#FF2A4B] border border-white/50 cursor-pointer hover:scale-125 transition-transform"
           />
           <span className="font-mono-hud text-[7.5px] tracking-[0.2em] text-[#E6F8FF]/65 mt-0.5">
             STX AI
@@ -324,53 +467,53 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
           <button
             type="button"
             onClick={() => openModule('WIFI')}
-            className="flex flex-col items-center gap-0.5 px-2 py-1 text-[#9FEFFF] hover:text-white transition-transform hover:-translate-y-0.5 cursor-pointer"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 text-[#9FEFFF] hover:text-white cursor-pointer"
           >
             <Globe className="w-4 h-4 text-[#00F0FF]" />
-            <span className="font-mono-hud text-[8.5px] tracking-widest">WIFI</span>
+            <span className="font-mono-hud text-[8px] tracking-widest">WIFI</span>
           </button>
 
           <button
             type="button"
             onClick={() => openModule('SEARCH')}
-            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-2 text-[#9FEFFF] hover:text-white transition-transform hover:-translate-y-2.5 cursor-pointer"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-1.5 text-[#9FEFFF] hover:text-white cursor-pointer"
           >
             <Search className="w-4 h-4 text-[#00F0FF]" />
-            <span className="font-mono-hud text-[8.5px] tracking-widest">SEARCH</span>
+            <span className="font-mono-hud text-[8px] tracking-widest">SEARCH</span>
           </button>
 
           <button
             type="button"
             onClick={() => openModule('VAULT')}
-            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-3 text-[#9FEFFF] hover:text-white transition-transform hover:-translate-y-3.5 cursor-pointer"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-2.5 text-[#9FEFFF] hover:text-white cursor-pointer"
           >
             <FolderLock className="w-4 h-4 text-[#00F0FF]" />
-            <span className="font-mono-hud text-[8.5px] tracking-widest">VAULT</span>
+            <span className="font-mono-hud text-[8px] tracking-widest">VAULT</span>
           </button>
 
           <button
             type="button"
             onClick={() => openModule('CAMERA')}
-            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-2 text-[#9FEFFF] hover:text-white transition-transform hover:-translate-y-2.5 cursor-pointer"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 -translate-y-1.5 text-[#9FEFFF] hover:text-white cursor-pointer"
           >
             <Camera className="w-4 h-4 text-[#00F0FF]" />
-            <span className="font-mono-hud text-[8.5px] tracking-widest">CAMERA</span>
+            <span className="font-mono-hud text-[8px] tracking-widest">CAMERA</span>
           </button>
 
           <button
             type="button"
             onClick={() => openModule('APPS')}
-            className="flex flex-col items-center gap-0.5 px-2 py-1 text-[#E6F8FF] hover:text-[#00F0FF] transition-transform hover:-translate-y-0.5 cursor-pointer"
+            className="flex flex-col items-center gap-0.5 px-2 py-1 text-[#E6F8FF] hover:text-[#00F0FF] cursor-pointer"
           >
             <Grid className="w-4 h-4 text-[#FF2A4B]" />
-            <span className="font-mono-hud text-[8.5px] tracking-widest">APPS</span>
+            <span className="font-mono-hud text-[8px] tracking-widest">APPS</span>
           </button>
         </div>
       </section>
 
       {/* STX AI HOLOGRAPHIC ASSISTANT OVERLAY */}
       {overlayMode === 'stx' && (
-        <div className="absolute inset-x-2.5 bottom-2.5 top-10 z-30 border border-[#00F0FF]/45 bg-[#020408]/95 backdrop-blur-xl flex flex-col p-2.5 shadow-[0_0_40px_rgba(0,0,0,0.95)]">
+        <div className="absolute inset-2 z-30 border border-[#00F0FF]/45 bg-[#020408]/96 flex flex-col p-2.5 shadow-[0_0_32px_rgba(0,0,0,0.95)]">
           <div className="flex items-center justify-between border-b border-[#00F0FF]/20 pb-1.5 mb-1 shrink-0">
             <span className="font-display text-xs font-bold tracking-[0.18em] text-[#E6F8FF]">
               STX AI HOLOGRAM
@@ -397,21 +540,37 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
 
       {/* IN-PORTRAIT MODULE CAROUSEL OVERLAY */}
       {overlayMode === 'module' && (
-        <div className="absolute inset-x-2 bottom-2 top-10 z-30 border border-[#00F0FF]/40 bg-[#020408]/95 backdrop-blur-xl flex flex-col p-2 shadow-[0_0_40px_rgba(0,0,0,0.95)]">
-          <div className="flex items-center justify-between px-2 pb-1.5 shrink-0">
-            <span className="font-display text-xs font-bold tracking-[0.18em] text-[#00F0FF]">
-              {activeWedge}
-              {selectedApp ? ` // ${selectedApp.name}` : ''}
-            </span>
+        <div className="absolute inset-2 z-30 border border-[#00F0FF]/40 bg-[#020408]/96 flex flex-col p-2 shadow-[0_0_32px_rgba(0,0,0,0.95)]">
+          <div className="flex items-center justify-between px-1 pb-1.5 shrink-0 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {selectedApp && onStepBackApp && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hudSound.playDetentClick();
+                    onStepBackApp();
+                  }}
+                  className="flex items-center gap-0.5 px-1.5 py-0.5 border border-[#00F0FF]/45 text-[#00F0FF] font-mono-hud text-[9px] cursor-pointer shrink-0"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                  <span>APPS</span>
+                </button>
+              )}
+              <span className="font-display text-xs font-bold tracking-[0.16em] text-[#00F0FF] truncate">
+                {activeWedge}
+                {selectedApp ? ` // ${selectedApp.name}` : ''}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setOverlayMode('none')}
-              className="p-1 border border-[#00F0FF]/35 text-[#00F0FF] hover:bg-[#00F0FF]/15 cursor-pointer"
+              className="p-1 border border-[#00F0FF]/35 text-[#00F0FF] hover:bg-[#00F0FF]/15 cursor-pointer shrink-0"
               aria-label="Close module"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
+
           <div className="flex-1 min-h-0">
             <CenterCarousel
               activeWedge={activeWedge}
@@ -440,6 +599,35 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
               onToggleLiveCamera={onToggleLiveCamera}
               shutterFlash={shutterFlash}
             />
+          </div>
+
+          {/* Portrait Module Card Stepper Bar */}
+          <div className="h-[32px] shrink-0 mt-1.5 flex items-center justify-between px-2.5 border border-[#00F0FF]/20 bg-[#03060B]/90">
+            <span className="font-mono-hud text-[9px] tracking-[0.12em] text-[#00F0FF]/85 truncate pr-2">
+              {currentOpt?.label}
+              {currentOpt?.subtitle ? ` · ${currentOpt.subtitle}` : ''}
+            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => stepModuleCard(-1)}
+                aria-label="Previous card"
+                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+              </button>
+              <span className="font-mono-hud text-[9.5px] text-[#E6F8FF] tabular-nums">
+                {String(activeIdx).padStart(2, '0')}/{String(totalCount).padStart(2, '0')}
+              </span>
+              <button
+                type="button"
+                onClick={() => stepModuleCard(1)}
+                aria-label="Next card"
+                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </div>
       )}

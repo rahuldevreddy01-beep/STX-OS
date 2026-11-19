@@ -78,74 +78,112 @@
   text-shadow: 0 0 10px rgba(255, 42, 75, 0.65);
 }
 
-/* Hinge progressive blur & chromatic split sweep (350ms) */
+/* Hinge sweep & chromatic split (GPU-only transform + opacity, zero blur lag) */
 @keyframes hingeSweepHorizontal {
   0% {
     opacity: 0;
-    transform: translateX(-35%) scaleX(1.3);
-    backdrop-filter: blur(0px);
+    transform: translate3d(-40%, 0, 0) scaleX(1.25);
   }
   30% {
     opacity: 1;
-    transform: translateX(0%) scaleX(1.04);
-    backdrop-filter: blur(18px);
+    transform: translate3d(0%, 0, 0) scaleX(1.02);
   }
   100% {
     opacity: 0;
-    transform: translateX(45%) scaleX(0.95);
-    backdrop-filter: blur(0px);
+    transform: translate3d(45%, 0, 0) scaleX(0.96);
   }
 }
 
 @keyframes hingeSweepVertical {
   0% {
     opacity: 0;
-    transform: translateY(-35%) scaleY(1.3);
-    backdrop-filter: blur(0px);
+    transform: translate3d(0, -40%, 0) scaleY(1.25);
   }
   30% {
     opacity: 1;
-    transform: translateY(0%) scaleY(1.04);
-    backdrop-filter: blur(18px);
+    transform: translate3d(0, 0%, 0) scaleY(1.02);
   }
   100% {
     opacity: 0;
-    transform: translateY(45%) scaleY(0.95);
-    backdrop-filter: blur(0px);
+    transform: translate3d(0, 45%, 0) scaleY(0.96);
   }
 }
 
 @keyframes rgbChromaticGlitch {
   0% {
-    transform: translate(0, 0) scale(1);
-    filter: blur(0px);
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.92;
   }
-  28% {
-    transform: translate(-3px, 1px) scale(0.985, 1.01);
-    filter: blur(3px);
+  32% {
+    transform: translate3d(-2px, 1px, 0) scale(0.988, 1.008);
+    opacity: 0.96;
   }
-  58% {
-    transform: translate(3px, -1px) scale(1.01, 0.99);
-    filter: blur(1.5px);
+  64% {
+    transform: translate3d(2px, -1px, 0) scale(1.008, 0.992);
+    opacity: 1;
   }
   100% {
-    transform: translate(0, 0) scale(1);
-    filter: blur(0px);
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
   }
+}
+
+@keyframes reactorSpinCW {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes reactorSpinCCW {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+.reactor-ring-r1 {
+  animation: reactorSpinCW 45s linear infinite;
+  will-change: transform;
+}
+
+.reactor-ring-r2 {
+  animation: reactorSpinCCW 26s linear infinite;
+  will-change: transform;
+}
+
+.reactor-ring-r3 {
+  animation: reactorSpinCW 16s linear infinite;
+  will-change: transform;
+}
+
+.reactor-ring-r4 {
+  animation: reactorSpinCCW 60s linear infinite;
+  will-change: transform;
 }
 
 .animate-hinge-h {
-  animation: hingeSweepHorizontal 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: hingeSweepHorizontal 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
 }
 
 .animate-hinge-v {
-  animation: hingeSweepVertical 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: hingeSweepVertical 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
 }
 
 .animate-rgb-glitch {
-  animation: rgbChromaticGlitch 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: rgbChromaticGlitch 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
 }
 
+.hud-scroll {
+  -webkit-overflow-scrolling: touch;
+}
 .hud-scroll::-webkit-scrollbar {
   width: 3px;
   height: 3px;
@@ -161,7 +199,11 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-hinge-h,
   .animate-hinge-v,
-  .animate-rgb-glitch {
+  .animate-rgb-glitch,
+  .reactor-ring-r1,
+  .reactor-ring-r2,
+  .reactor-ring-r3,
+  .reactor-ring-r4 {
     animation-duration: 1ms !important;
   }
 }

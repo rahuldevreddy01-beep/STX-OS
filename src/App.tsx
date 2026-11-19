@@ -30,7 +30,12 @@ import {
 import { hudSound } from './utils/soundFx';
 
 export default function App() {
-  const [mode, setMode] = useState<HudMode>('landscape-hub');
+  const [mode, setMode] = useState<HudMode>(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 640 && window.innerHeight > window.innerWidth) {
+      return 'portrait';
+    }
+    return 'landscape-hub';
+  });
   const [activeWedge, setActiveWedge] = useState<WedgeId>('APPS');
   const [activeSubId, setActiveSubId] = useState<string>('app-stx');
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
@@ -79,6 +84,33 @@ export default function App() {
   );
 
   const hingeTimeoutRef = useRef<number | null>(null);
+  const lastOrientationRef = useRef<'portrait' | 'landscape' | null>(
+    typeof window !== 'undefined'
+      ? window.innerHeight > window.innerWidth
+        ? 'portrait'
+        : 'landscape'
+      : null
+  );
+
+  useEffect(() => {
+    const handleResizeOrientation = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const nextOrient: 'portrait' | 'landscape' = h > w ? 'portrait' : 'landscape';
+      if (lastOrientationRef.current !== nextOrient) {
+        lastOrientationRef.current = nextOrient;
+        if (Math.min(w, h) < 640) {
+          setMode((prev) => {
+            if (nextOrient === 'portrait' && prev === 'landscape-hub') return 'portrait';
+            if (nextOrient === 'landscape' && prev === 'portrait') return 'landscape-hub';
+            return prev;
+          });
+        }
+      }
+    };
+    window.addEventListener('resize', handleResizeOrientation);
+    return () => window.removeEventListener('resize', handleResizeOrientation);
+  }, []);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -153,7 +185,7 @@ export default function App() {
       setMode(nextMode);
       hingeTimeoutRef.current = window.setTimeout(() => {
         setHingeActive(false);
-      }, 360);
+      }, 280);
     },
     []
   );
@@ -539,16 +571,16 @@ export default function App() {
 
   const containerClass =
     mode === 'portrait'
-      ? 'w-full max-w-[430px] h-[calc(100vh-52px)] rounded-[28px] border border-[#00F0FF]/25'
+      ? 'w-full h-full sm:max-w-[430px] sm:h-[min(calc(100dvh-56px),860px)] sm:rounded-[28px] sm:border sm:border-[#00F0FF]/25'
       : mode === 'stx-cover'
-        ? 'w-[min(94vw,420px)] h-[min(78vh,420px)] rounded-[24px] border border-[#00F0FF]/35'
-        : 'w-full h-[calc(100vh-44px)] rounded-none border-0';
+        ? 'w-[min(94vw,420px)] h-[min(78dvh,420px)] rounded-[20px] sm:rounded-[24px] border border-[#00F0FF]/35'
+        : 'w-full h-full rounded-none border-0';
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden hud-obsidian-bg flex flex-col items-center justify-center">
+    <div className="relative h-dvh w-screen overflow-hidden hud-obsidian-bg flex flex-col items-center justify-center">
       <div className="relative z-20 flex-1 w-full flex items-center justify-center min-h-0">
         <div
-          className={`relative overflow-hidden bg-[#020306]/90 shadow-[0_0_60px_rgba(0,0,0,0.95)] transition-[width,height,border-radius] duration-350 ease-out ${containerClass} ${
+          className={`relative overflow-hidden bg-[#020306]/92 shadow-[0_0_48px_rgba(0,0,0,0.95)] ${containerClass} ${
             hingeActive ? 'animate-rgb-glitch' : ''
           }`}
         >
@@ -574,6 +606,12 @@ export default function App() {
                 activeSubId={activeSubId}
                 onSelectRootWedge={handleSelectRootWedge}
                 onSelectSubOption={handleSelectSubOption}
+                onStepBackApp={() => {
+                  if (selectedApp) {
+                    setSelectedAppId(null);
+                    setActiveSubId(selectedApp.id);
+                  }
+                }}
                 selectedApp={selectedApp}
                 apps={apps}
                 onToggleAppSetting={handleToggleAppSetting}
@@ -588,6 +626,10 @@ export default function App() {
                 onSendStxCommand={handleSendStxCommand}
                 voiceActive={voiceActive}
                 onToggleVoice={() => setVoiceActive((v) => !v)}
+                isPlaying={isPlaying}
+                onTogglePlay={() => setIsPlaying((p) => !p)}
+                trackIndex={trackIndex}
+                onStepTrack={handleStepCarousel}
                 cameraMode={cameraMode}
                 cameraZoom={cameraZoom}
                 liveCameraEnabled={liveCameraEnabled}
