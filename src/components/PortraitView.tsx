@@ -175,22 +175,6 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
     setOverlayMode(wedge === 'STX' ? 'stx' : 'module');
   };
 
-  const activeIdx = Math.max(0, dialOptions.findIndex((o) => o.id === activeSubId)) + 1;
-  const totalCount = Math.max(1, dialOptions.length);
-  const currentOpt = dialOptions[activeIdx - 1] ?? dialOptions[0];
-
-  const stepModuleCard = (dir: -1 | 1) => {
-    const idx = Math.max(
-      0,
-      dialOptions.findIndex((o) => o.id === activeSubId)
-    );
-    const nextIdx = (idx + dir + dialOptions.length) % dialOptions.length;
-    if (dialOptions[nextIdx]) {
-      hudSound.playDetentClick();
-      onSelectSubOption(dialOptions[nextIdx].id, false);
-    }
-  };
-
   const toggleItems: {
     key: keyof QuickToggles;
     label: string;
@@ -648,35 +632,6 @@ export const PortraitView: React.FC<PortraitViewProps> = ({
               onToggleLiveCamera={onToggleLiveCamera}
               shutterFlash={shutterFlash}
             />
-          </div>
-
-          {/* Portrait Module Card Stepper Bar */}
-          <div className="h-[32px] shrink-0 mt-1.5 flex items-center justify-between px-2.5 border border-[#00F0FF]/20 bg-[#03060B]/90">
-            <span className="font-mono-hud text-[9px] tracking-[0.12em] text-[#00F0FF]/85 truncate pr-2">
-              {currentOpt?.label}
-              {currentOpt?.subtitle ? ` · ${currentOpt.subtitle}` : ''}
-            </span>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={() => stepModuleCard(-1)}
-                aria-label="Previous card"
-                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
-              >
-                <SkipBack className="w-3.5 h-3.5" />
-              </button>
-              <span className="font-mono-hud text-[9.5px] text-[#E6F8FF] tabular-nums">
-                {String(activeIdx).padStart(2, '0')}/{String(totalCount).padStart(2, '0')}
-              </span>
-              <button
-                type="button"
-                onClick={() => stepModuleCard(1)}
-                aria-label="Next card"
-                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
-              >
-                <SkipForward className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
           </motion.div>
         )}

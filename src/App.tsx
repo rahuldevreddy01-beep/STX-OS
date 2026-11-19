@@ -845,7 +845,6 @@ export default function App() {
                     onToggleBriefing={handleToggleBriefing}
                     stxLogs={stxLogs}
                     onSendStxCommand={handleSendStxCommand}
-                    onStepTrack={handleStepCarousel}
                     voiceActive={voiceActive}
                     onToggleVoice={() => {
                       hudSound.playChime();

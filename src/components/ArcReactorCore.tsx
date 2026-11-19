@@ -1,7 +1,8 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
-import { DialOption } from '../types/hud';
+import { AppItem, DialOption } from '../types/hud';
 import { hudSound } from '../utils/soundFx';
+import { HologramOrb3D } from './HologramOrb3D';
 
 interface ArcReactorCoreProps {
   variant: 'portrait' | 'rotary-hub' | 'half-dial';
@@ -12,10 +13,17 @@ interface ArcReactorCoreProps {
   centerHint?: string;
   size?: number;
   pulseTrigger?: number;
+  apps?: AppItem[];
+  onLaunchApp?: (app: AppItem) => void;
+  pitchDeg?: number;
+  rollDeg?: number;
+  orbAccent?: 'cyan' | 'crimson' | 'amber';
+  voiceActive?: boolean;
+  notifCount?: number;
 }
 
-const CX = 160;
-const CY = 160;
+const CX = 180;
+const CY = 180;
 
 function polarToCartesian(cx: number, cy: number, radius: number, angleInDegrees: number) {
   const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180.0;
@@ -73,12 +81,13 @@ function describeArc(cx: number, cy: number, radius: number, startAngle: number,
   return ['M', start.x, start.y, 'A', radius, radius, 0, largeArcFlag, 0, end.x, end.y].join(' ');
 }
 
-const STATIC_TICKS = Array.from({ length: 72 }, (_, i) => {
-  const deg = i * 5;
-  const isMajor = deg % 15 === 0;
-  const isCardinal = deg % 45 === 0;
-  const p1 = polarToCartesian(CX, CY, isMajor ? 140 : 144, deg);
-  const p2 = polarToCartesian(CX, CY, 149, deg);
+// 90 radiating perimeter tick needles (clean precision caliper bezel)
+const PERIMETER_TICKS = Array.from({ length: 90 }, (_, i) => {
+  const deg = i * 4;
+  const isMajor = deg % 20 === 0;
+  const isCardinal = deg % 90 === 0;
+  const p1 = polarToCartesian(CX, CY, isCardinal ? 156 : isMajor ? 160 : 163, deg);
+  const p2 = polarToCartesian(CX, CY, isMajor ? 170 : 168, deg);
   return {
     deg,
     x1: p1.x,
@@ -86,26 +95,26 @@ const STATIC_TICKS = Array.from({ length: 72 }, (_, i) => {
     x2: p2.x,
     y2: p2.y,
     stroke: isCardinal
-      ? '#00F0FF'
+      ? '#FF2A4B'
       : isMajor
-        ? 'rgba(230,248,255,0.45)'
+        ? 'rgba(0,240,255,0.62)'
         : 'rgba(0,240,255,0.18)',
-    strokeWidth: isCardinal ? 1.5 : 0.85,
+    strokeWidth: isCardinal ? 1.6 : isMajor ? 1.1 : 0.75,
   };
 });
 
-const StaticReactorBackdrop = memo(() => (
+const StaticPerimeterHalo = memo(() => (
   <g className="pointer-events-none">
     <circle
       cx={CX}
       cy={CY}
-      r={151}
+      r={157}
       fill="none"
-      stroke="rgba(0,240,255,0.2)"
-      strokeWidth="1"
+      stroke="rgba(0,240,255,0.22)"
+      strokeWidth="0.9"
       strokeDasharray="3 6"
     />
-    {STATIC_TICKS.map((t) => (
+    {PERIMETER_TICKS.map((t) => (
       <line
         key={t.deg}
         x1={t.x1}
@@ -118,117 +127,7 @@ const StaticReactorBackdrop = memo(() => (
     ))}
   </g>
 ));
-StaticReactorBackdrop.displayName = 'StaticReactorBackdrop';
-
-const ReactorInnerRings = memo(({ showCenterDot }: { showCenterDot: boolean }) => (
-  <>
-    {/* 4 GPU-animated concentric counter-rotating reactor rings (zero JS rAF re-renders) */}
-    <g
-      style={{ transformOrigin: `${CX}px ${CY}px` }}
-      className="pointer-events-none reactor-ring-r1"
-    >
-      <circle
-        cx={CX}
-        cy={CY}
-        r={74}
-        fill="none"
-        stroke="rgba(0,240,255,0.38)"
-        strokeWidth="1.2"
-        strokeDasharray="18 8 4 8"
-      />
-      {[0, 90, 180, 270].map((a) => (
-        <g key={a}>
-          <path
-            d={describeArc(CX, CY, 68, a - 14, a + 14)}
-            fill="none"
-            stroke="rgba(0,240,255,0.25)"
-            strokeWidth="5.5"
-          />
-          <path
-            d={describeArc(CX, CY, 68, a - 14, a + 14)}
-            fill="none"
-            stroke="#00F0FF"
-            strokeWidth="2.4"
-          />
-        </g>
-      ))}
-    </g>
-
-    <g
-      style={{ transformOrigin: `${CX}px ${CY}px` }}
-      className="pointer-events-none reactor-ring-r2"
-    >
-      <circle
-        cx={CX}
-        cy={CY}
-        r={58}
-        fill="none"
-        stroke="rgba(230,248,255,0.35)"
-        strokeWidth="1"
-        strokeDasharray="3 5"
-      />
-      <path d={describeArc(CX, CY, 54, 10, 110)} fill="none" stroke="rgba(230,248,255,0.2)" strokeWidth="4.5" />
-      <path d={describeArc(CX, CY, 54, 10, 110)} fill="none" stroke="#E6F8FF" strokeWidth="2.1" />
-      <path d={describeArc(CX, CY, 54, 190, 290)} fill="none" stroke="rgba(0,240,255,0.25)" strokeWidth="4.5" />
-      <path d={describeArc(CX, CY, 54, 190, 290)} fill="none" stroke="#00F0FF" strokeWidth="2.1" />
-      <path d={describeArc(CX, CY, 54, 130, 165)} fill="none" stroke="#FF2A4B" strokeWidth="2" />
-    </g>
-
-    <g
-      style={{ transformOrigin: `${CX}px ${CY}px` }}
-      className="pointer-events-none reactor-ring-r3"
-    >
-      <circle
-        cx={CX}
-        cy={CY}
-        r={42}
-        fill="none"
-        stroke="rgba(0,240,255,0.5)"
-        strokeWidth="1.4"
-        strokeDasharray="12 6"
-      />
-      {[30, 150, 270].map((a) => (
-        <path
-          key={a}
-          d={describeArc(CX, CY, 37, a - 22, a + 22)}
-          fill="none"
-          stroke="#E6F8FF"
-          strokeWidth="2.6"
-        />
-      ))}
-    </g>
-
-    <g className="pointer-events-none">
-      <circle
-        cx={CX}
-        cy={CY}
-        r={30}
-        fill="rgba(2,4,8,0.92)"
-        stroke="rgba(0,240,255,0.5)"
-        strokeWidth="1"
-      />
-      <circle cx={CX} cy={CY} r={24} fill="url(#coreRadial)" />
-      <g style={{ transformOrigin: `${CX}px ${CY}px` }} className="reactor-ring-r4">
-        <circle
-          cx={CX}
-          cy={CY}
-          r={21}
-          fill="none"
-          stroke="#E6F8FF"
-          strokeWidth="2.4"
-          strokeDasharray="24 6 8 6"
-        />
-      </g>
-      {showCenterDot && (
-        <>
-          <circle cx={CX} cy={CY} r={11} fill="none" stroke="#00F0FF" strokeWidth="1.2" opacity="0.9" />
-          <circle cx={CX} cy={CY} r={4.5} fill="#E6F8FF" />
-        </>
-      )}
-    </g>
-  </>
-));
-ReactorInnerRings.displayName = 'ReactorInnerRings';
+StaticPerimeterHalo.displayName = 'StaticPerimeterHalo';
 
 export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
   ({
@@ -240,6 +139,13 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
     centerHint,
     size = 280,
     pulseTrigger = 0,
+    apps,
+    onLaunchApp,
+    pitchDeg = 0,
+    rollDeg = 0,
+    orbAccent,
+    voiceActive = false,
+    notifCount = 0,
   }) => {
     const svgRef = useRef<SVGSVGElement | null>(null);
     const count = Math.max(1, options.length);
@@ -253,7 +159,6 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
 
     const [wheelAngle, setWheelAngle] = useState<number>(() => targetSlotDeg - activeIndex * stepDeg);
     const [isDragging, setIsDragging] = useState(false);
-    const [detentPulse, setDetentPulse] = useState(false);
 
     const dragState = useRef<{
       active: boolean;
@@ -286,14 +191,6 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
       });
       dragState.current.lastSnappedIdx = activeIndex;
     }, [activeIndex, stepDeg, targetSlotDeg, count]);
-
-    useEffect(() => {
-      if (pulseTrigger > 0) {
-        setDetentPulse(true);
-        const t = setTimeout(() => setDetentPulse(false), 180);
-        return () => clearTimeout(t);
-      }
-    }, [pulseTrigger]);
 
     const getPointerAngle = (clientX: number, clientY: number) => {
       const svg = svgRef.current;
@@ -389,51 +286,111 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
       }
     };
 
-    const gapAngle = count <= 4 ? 5 : count <= 6 ? 3.5 : 2.5;
+    const hasInnerAppOrbit =
+      variant === 'rotary-hub' && Boolean(apps && apps.length > 0 && onLaunchApp);
+
+    const mainInnerR = hasInnerAppOrbit ? 97 : 90;
+    const mainOuterR = 146;
+    const mainActiveOuterR = 152;
+    const gapAngle = count <= 4 ? 5 : count <= 6 ? 3.5 : 2.3;
 
     const sectorGeometry = useMemo(() => {
       return options.map((opt, idx) => {
         const centerAngle = idx * stepDeg;
         const start = centerAngle - stepDeg / 2 + gapAngle;
         const end = centerAngle + stepDeg / 2 - gapAngle;
+        const midR = (mainInnerR + mainOuterR) / 2;
         return {
           opt,
           centerAngle,
           start,
           end,
-          portraitPath: describeAnnularSector(CX, CY, 94, 132, start, end),
-          portraitActivePath: describeAnnularSector(CX, CY, 94, 136, start, end),
-          portraitLabelPos: polarToCartesian(CX, CY, 114, centerAngle),
-          dialPath: describeAnnularSector(CX, CY, 84, 128, start, end),
-          dialActivePath: describeAnnularSector(CX, CY, 84, 136, start, end),
-          dialHaloPath: describeAnnularSector(CX, CY, 81, 140, start - 1.2, end + 1.2),
-          dialLabelPos: polarToCartesian(CX, CY, 108, centerAngle),
-          dialActiveLabelPos: polarToCartesian(CX, CY, 113, centerAngle),
-          dialCodePos: polarToCartesian(CX, CY, 93, centerAngle),
+          portraitPath: describeAnnularSector(CX, CY, 94, 146, start, end),
+          portraitActivePath: describeAnnularSector(CX, CY, 94, 152, start, end),
+          portraitLabelPos: polarToCartesian(CX, CY, 121, centerAngle),
+          portraitBadgePos: polarToCartesian(CX, CY, 142, centerAngle + stepDeg * 0.22),
+          dialPath: describeAnnularSector(CX, CY, mainInnerR, mainOuterR, start, end),
+          dialActivePath: describeAnnularSector(CX, CY, mainInnerR, mainActiveOuterR, start, end),
+          dialHaloPath: describeAnnularSector(
+            CX,
+            CY,
+            mainInnerR - 2.5,
+            mainActiveOuterR + 2.5,
+            start - 1,
+            end + 1
+          ),
+          dialLabelPos: polarToCartesian(CX, CY, midR + 3, centerAngle),
+          dialActiveLabelPos: polarToCartesian(CX, CY, midR + 6, centerAngle),
+          dialCodePos: polarToCartesian(CX, CY, mainInnerR + 9, centerAngle),
+          dialBadgePos: polarToCartesian(CX, CY, mainOuterR - 5, centerAngle + stepDeg * 0.24),
         };
       });
-    }, [options, stepDeg, gapAngle]);
+    }, [options, stepDeg, gapAngle, mainInnerR, mainOuterR, mainActiveOuterR]);
+
+    const pinnedApps = useMemo(() => {
+      if (!apps) return [];
+      const pinned = apps.filter((a) => a.pinnedToDock);
+      const source = pinned.length >= 4 ? pinned : apps;
+      return source.slice(0, 6);
+    }, [apps]);
+
+    const innerAppSectors = useMemo(() => {
+      if (!hasInnerAppOrbit || pinnedApps.length === 0) return [];
+      const step = 360 / pinnedApps.length;
+      return pinnedApps.map((app, i) => {
+        const center = i * step;
+        const s = center - step / 2 + 4;
+        const e = center + step / 2 - 4;
+        return {
+          app,
+          path: describeAnnularSector(CX, CY, 68, 93, s, e),
+          labelPos: polarToCartesian(CX, CY, 80.5, center),
+          badgePos: polarToCartesian(CX, CY, 90, center + step * 0.23),
+        };
+      });
+    }, [hasInnerAppOrbit, pinnedApps]);
+
+    const activeOpt = options[activeIndex];
+    const resolvedOrbAccent: 'cyan' | 'crimson' | 'amber' =
+      orbAccent ??
+      (voiceActive || activeOpt?.accent === 'crimson' || activeOptionId === 'STX'
+        ? 'crimson'
+        : activeOptionId === 'HEALTH'
+          ? 'amber'
+          : 'cyan');
+
+    const orbSize = Math.round(size * (hasInnerAppOrbit ? 0.39 : 0.48));
+
+    const badgeForWedge = (id: string): number | undefined => {
+      if (id === 'APPS' && apps) return apps.length;
+      if (id === 'BRIEF' && notifCount > 0) return notifCount;
+      const foundApp = apps?.find((a) => a.id === id);
+      return foundApp?.badgeCount;
+    };
 
     return (
       <div
         className="relative flex items-center justify-center select-none touch-none"
         style={{ width: size, height: size }}
       >
+        {/* CENTER 3D VOLUMETRIC PLASMA ORB */}
         <div
-          className={`pointer-events-none absolute rounded-full transition-transform duration-200 will-change-transform ${
-            detentPulse ? 'scale-110 opacity-100' : 'scale-100 opacity-75'
-          }`}
-          style={{
-            width: size * 0.56,
-            height: size * 0.56,
-            background:
-              'radial-gradient(circle, rgba(0,240,255,0.22) 0%, rgba(0,240,255,0.05) 54%, transparent 75%)',
-          }}
-        />
+          className="pointer-events-none absolute inset-0 flex items-center justify-center z-10"
+          aria-hidden="true"
+        >
+          <HologramOrb3D
+            size={orbSize}
+            accent={resolvedOrbAccent}
+            active={voiceActive || variant === 'half-dial'}
+            pulseTrigger={pulseTrigger}
+            pitchDeg={pitchDeg}
+            rollDeg={rollDeg}
+          />
+        </div>
 
         <svg
           ref={svgRef}
-          viewBox="0 0 320 320"
+          viewBox="0 0 360 360"
           width={size}
           height={size}
           onPointerDown={handlePointerDown}
@@ -441,41 +398,34 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           onWheel={handleWheel}
-          className={`overflow-visible ${
+          className={`relative z-20 overflow-visible ${
             variant !== 'portrait' ? 'cursor-grab active:cursor-grabbing' : ''
           }`}
         >
-          <defs>
-            <radialGradient id="coreRadial" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#E6F8FF" stopOpacity="0.92" />
-              <stop offset="44%" stopColor="#00F0FF" stopOpacity="0.45" />
-              <stop offset="100%" stopColor="#020306" stopOpacity="0" />
-            </radialGradient>
-          </defs>
-
-          <StaticReactorBackdrop />
+          <StaticPerimeterHalo />
 
           {variant === 'half-dial' && (
             <g className="pointer-events-none">
               <path
-                d={describeArc(CX, CY, 155, 195, 255)}
+                d={describeArc(CX, CY, 158, 195, 255)}
                 fill="none"
                 stroke="#FF2A4B"
-                strokeWidth="2.2"
+                strokeWidth="2.4"
               />
               <path
-                d={describeArc(CX, CY, 155, 285, 345)}
+                d={describeArc(CX, CY, 158, 285, 345)}
                 fill="none"
                 stroke="#00F0FF"
-                strokeWidth="1.8"
+                strokeWidth="1.9"
               />
             </g>
           )}
 
           {variant === 'portrait' && (
             <g>
-              {sectorGeometry.map(({ opt, portraitPath, portraitActivePath, portraitLabelPos }) => {
+              {sectorGeometry.map(({ opt, portraitPath, portraitActivePath, portraitLabelPos, portraitBadgePos }) => {
                 const isActive = opt.id === activeOptionId;
+                const badge = badgeForWedge(opt.id);
                 return (
                   <g
                     key={opt.id}
@@ -496,14 +446,38 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                       y={portraitLabelPos.y}
                       textAnchor="middle"
                       dominantBaseline="middle"
-                      fill={isActive ? '#FFFFFF' : 'rgba(159,239,255,0.9)'}
-                      fontSize="7.4"
+                      fill={isActive ? '#FFFFFF' : 'rgba(159,239,255,0.92)'}
+                      fontSize="8.2"
                       fontWeight="700"
                       fontFamily="Orbitron, sans-serif"
                       letterSpacing="0.06em"
                     >
                       {opt.label}
                     </text>
+                    {badge !== undefined && badge > 0 && (
+                      <g className="pointer-events-none">
+                        <circle
+                          cx={portraitBadgePos.x}
+                          cy={portraitBadgePos.y}
+                          r={6.8}
+                          fill="#FF2A4B"
+                          stroke="#020306"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={portraitBadgePos.x}
+                          y={portraitBadgePos.y + 0.5}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fill="#FFFFFF"
+                          fontSize="6"
+                          fontFamily="JetBrains Mono, monospace"
+                          fontWeight="700"
+                        >
+                          {badge}
+                        </text>
+                      </g>
+                    )}
                   </g>
                 );
               })}
@@ -535,11 +509,13 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                   dialLabelPos,
                   dialActiveLabelPos,
                   dialCodePos,
+                  dialBadgePos,
                 }) => {
                   const isSelected = opt.id === activeOptionId;
                   const isCrimson = opt.accent === 'crimson';
                   const labelPos = isSelected ? dialActiveLabelPos : dialLabelPos;
                   const counterTextRot = -wheelAngle;
+                  const badge = badgeForWedge(opt.id);
 
                   return (
                     <g
@@ -549,7 +525,6 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                         e.stopPropagation();
                         if (dragState.current.moved) return;
                         hudSound.playChime();
-                        // Direct click on any wedge in rotary-hub or half-dial opens/activates immediately
                         onSelectOption(opt.id, true);
                       }}
                     >
@@ -558,7 +533,7 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                         fill={
                           isSelected
                             ? isCrimson
-                              ? 'rgba(255, 42, 75, 0.24)'
+                              ? 'rgba(255, 42, 75, 0.25)'
                               : 'rgba(0, 240, 255, 0.22)'
                             : 'rgba(6, 12, 20, 0.84)'
                         }
@@ -569,9 +544,9 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                               : '#E6F8FF'
                             : isCrimson
                               ? 'rgba(255, 42, 75, 0.45)'
-                              : 'rgba(0, 240, 255, 0.34)'
+                              : 'rgba(0, 240, 255, 0.36)'
                         }
-                        strokeWidth={isSelected ? 1.8 : 0.9}
+                        strokeWidth={isSelected ? 1.85 : 0.9}
                       />
 
                       {isSelected && (
@@ -590,7 +565,7 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                         textAnchor="middle"
                         dominantBaseline="middle"
                         fill={isSelected ? '#FF2A4B' : 'rgba(230,248,255,0.48)'}
-                        fontSize="6.5"
+                        fontSize="6.4"
                         fontFamily="JetBrains Mono, monospace"
                         fontWeight="700"
                         transform={`rotate(${counterTextRot}, ${dialCodePos.x}, ${dialCodePos.y})`}
@@ -604,7 +579,7 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                         textAnchor="middle"
                         dominantBaseline="middle"
                         fill={isSelected ? '#FFFFFF' : isCrimson ? '#FFB4C0' : '#9FEFFF'}
-                        fontSize={isSelected ? '8.5' : '7.2'}
+                        fontSize={isSelected ? '8.8' : '7.4'}
                         fontWeight="700"
                         fontFamily="Orbitron, sans-serif"
                         letterSpacing="0.05em"
@@ -612,12 +587,122 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
                       >
                         {opt.label}
                       </text>
+
+                      {badge !== undefined && badge > 0 && (
+                        <g
+                          className="pointer-events-none"
+                          transform={`rotate(${counterTextRot}, ${dialBadgePos.x}, ${dialBadgePos.y})`}
+                        >
+                          <circle
+                            cx={dialBadgePos.x}
+                            cy={dialBadgePos.y}
+                            r={6.4}
+                            fill="#FF2A4B"
+                            stroke="#020306"
+                            strokeWidth="1"
+                          />
+                          <text
+                            x={dialBadgePos.x}
+                            y={dialBadgePos.y + 0.5}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                            fill="#FFFFFF"
+                            fontSize="5.8"
+                            fontFamily="JetBrains Mono, monospace"
+                            fontWeight="700"
+                          >
+                            {badge}
+                          </text>
+                        </g>
+                      )}
                     </g>
                   );
                 }
               )}
             </g>
           )}
+
+          {/* INNER PINNED ANDROID APPS ORBIT RING */}
+          {hasInnerAppOrbit && (
+            <g>
+              {innerAppSectors.map(({ app, path, labelPos, badgePos }) => (
+                <g
+                  key={app.id}
+                  className="cursor-pointer group"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    hudSound.playChime();
+                    onLaunchApp?.(app);
+                  }}
+                >
+                  <path
+                    d={path}
+                    fill="rgba(4, 12, 20, 0.88)"
+                    stroke="rgba(0, 240, 255, 0.45)"
+                    strokeWidth="0.95"
+                    className="group-hover:fill-[rgba(0,240,255,0.22)] group-hover:stroke-[#E6F8FF] transition-colors"
+                  />
+                  <text
+                    x={labelPos.x}
+                    y={labelPos.y}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#E6F8FF"
+                    fontSize="6.1"
+                    fontFamily="Orbitron, sans-serif"
+                    fontWeight="700"
+                    letterSpacing="0.04em"
+                  >
+                    {app.name.slice(0, 6)}
+                  </text>
+                  {app.badgeCount && app.badgeCount > 0 && (
+                    <g className="pointer-events-none">
+                      <circle cx={badgePos.x} cy={badgePos.y} r={4.5} fill="#FF2A4B" />
+                      <text
+                        x={badgePos.x}
+                        y={badgePos.y + 0.4}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="#FFFFFF"
+                        fontSize="4.8"
+                        fontFamily="JetBrains Mono, monospace"
+                        fontWeight="700"
+                      >
+                        {app.badgeCount}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              ))}
+            </g>
+          )}
+
+          {/* ROTATING PRECISION BEZEL FRAMING THE 3D PLASMA ORB */}
+          <g className="pointer-events-none">
+            <g style={{ transformOrigin: `${CX}px ${CY}px` }} className="reactor-ring-r1">
+              <circle
+                cx={CX}
+                cy={CY}
+                r={hasInnerAppOrbit ? 64 : 78}
+                fill="none"
+                stroke="rgba(0,240,255,0.52)"
+                strokeWidth="1.2"
+                strokeDasharray="16 8 4 8"
+              />
+            </g>
+            <g style={{ transformOrigin: `${CX}px ${CY}px` }} className="reactor-ring-r3">
+              <circle
+                cx={CX}
+                cy={CY}
+                r={hasInnerAppOrbit ? 57 : 68}
+                fill="none"
+                stroke="rgba(255,42,75,0.45)"
+                strokeWidth="1.15"
+                strokeDasharray="12 18"
+              />
+            </g>
+          </g>
 
           {variant !== 'portrait' && (
             <g
@@ -627,15 +712,13 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
               }}
               className="pointer-events-none"
             >
-              <polygon points={`${CX},15 ${CX - 5},6 ${CX + 5},6`} fill="#FF2A4B" />
-              <line x1={CX} y1={17} x2={CX} y2={26} stroke="#E6F8FF" strokeWidth="1.5" />
+              <polygon points={`${CX},18 ${CX - 5},8 ${CX + 5},8`} fill="#FF2A4B" />
+              <line x1={CX} y1={20} x2={CX} y2={28} stroke="#E6F8FF" strokeWidth="1.5" />
             </g>
           )}
-
-          <ReactorInnerRings showCenterDot={!centerHint} />
         </svg>
 
-        {/* Dedicated Real Clickable Center Core Button */}
+        {/* CLICKABLE CENTER 3D ORB CORE BUTTON */}
         <button
           type="button"
           onPointerDown={(e) => e.stopPropagation()}
@@ -649,17 +732,22 @@ export const ArcReactorCore: React.FC<ArcReactorCoreProps> = memo(
               onSelectOption(activeOptionId, true);
             }
           }}
-          aria-label={centerHint ? `Center ${centerHint}` : 'Activate selected dial module'}
-          className="absolute z-30 rounded-full flex flex-col items-center justify-center cursor-pointer hover:bg-[#00F0FF]/15 active:scale-95 transition-transform"
+          aria-label={centerHint ? `Center ${centerHint}` : `Open ${activeOpt?.label ?? 'module'}`}
+          title={centerHint ? centerHint : `Open ${activeOpt?.label ?? 'module'}`}
+          className="group absolute z-30 rounded-full flex flex-col items-center justify-center cursor-pointer active:scale-95 transition-transform"
           style={{
-            width: size * 0.22,
-            height: size * 0.22,
+            width: orbSize * 0.88,
+            height: orbSize * 0.88,
           }}
         >
-          {centerHint && (
-            <span className="flex items-center gap-0.5 font-mono-hud text-[9px] font-bold tracking-wider text-[#E6F8FF] text-glow-cyan">
+          {centerHint ? (
+            <span className="flex items-center gap-0.5 px-2 py-0.5 bg-[#020306]/75 border border-[#00F0FF]/45 font-mono-hud text-[8.5px] font-bold tracking-wider text-[#E6F8FF] text-glow-cyan">
               <ChevronLeft className="w-3 h-3 text-[#00F0FF]" />
               <span>{centerHint}</span>
+            </span>
+          ) : (
+            <span className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 bg-[#020306]/80 border border-[#00F0FF]/50 font-mono-hud text-[8px] tracking-widest text-[#E6F8FF]">
+              OPEN
             </span>
           )}
         </button>

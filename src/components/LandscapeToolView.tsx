@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { ChevronLeft, SkipBack, SkipForward } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import {
   AppItem,
   BriefingEntry,
@@ -40,7 +40,6 @@ interface LandscapeToolViewProps {
   onToggleBriefing: (id: string) => void;
   stxLogs: StxLogEntry[];
   onSendStxCommand: (cmd: string) => void;
-  onStepTrack: (dir: -1 | 1) => void;
   voiceActive: boolean;
   onToggleVoice: () => void;
   onEnableSensors: () => Promise<boolean>;
@@ -75,7 +74,6 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
   onToggleBriefing,
   stxLogs,
   onSendStxCommand,
-  onStepTrack,
   voiceActive,
   onToggleVoice,
   onEnableSensors,
@@ -107,9 +105,6 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
   const dialSize = Math.max(175, Math.min(280, Math.floor(stageDims.h * 0.9)));
 
   const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-  const activeIdx = Math.max(0, dialOptions.findIndex((o) => o.id === activeSubId)) + 1;
-  const totalCount = Math.max(1, dialOptions.length);
-  const currentOpt = dialOptions[activeIdx - 1] ?? dialOptions[0];
 
   return (
     <div className="relative flex flex-col h-full w-full overflow-hidden">
@@ -184,71 +179,6 @@ export const LandscapeToolView: React.FC<LandscapeToolViewProps> = ({
               onToggleLiveCamera={onToggleLiveCamera}
               shutterFlash={shutterFlash}
             />
-          </div>
-
-          {/* Mobile Portrait Horizontal Notch Strip (when narrow < 540px so half-dial doesn't crush cards) */}
-          {isNarrowPortrait && (
-            <div className="shrink-0 flex items-center gap-1.5 overflow-x-auto hud-scroll px-1 py-1">
-              {dialOptions.map((opt) => {
-                const isSel = opt.id === activeSubId;
-                const isCrimson = opt.accent === 'crimson';
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => {
-                      hudSound.playDetentClick();
-                      onSelectSubOption(opt.id, isSel || opt.isAction);
-                    }}
-                    className={`px-2.5 py-1 border font-mono-hud text-[9.5px] tracking-wider whitespace-nowrap shrink-0 cursor-pointer ${
-                      isSel
-                        ? isCrimson
-                          ? 'border-[#FF2A4B] bg-[#FF2A4B]/20 text-white'
-                          : 'border-[#00F0FF] bg-[#00F0FF]/20 text-white'
-                        : 'border-[#00F0FF]/25 bg-[#040A12] text-[#9FEFFF]/75'
-                    }`}
-                  >
-                    {opt.shortCode} {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Compact Carousel Stepper Bar */}
-          <div className="h-[34px] shrink-0 mx-1 sm:mx-3 mt-0.5 flex items-center justify-between px-2.5 sm:px-3 border border-[#00F0FF]/20 bg-[#03060B]/85">
-            <span className="font-mono-hud text-[9px] sm:text-[9.5px] tracking-[0.12em] text-[#00F0FF]/85 truncate pr-2">
-              {currentOpt?.label}
-              {currentOpt?.subtitle ? ` · ${currentOpt.subtitle}` : ''}
-            </span>
-
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  hudSound.playDetentClick();
-                  onStepTrack(-1);
-                }}
-                aria-label="Previous card"
-                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
-              >
-                <SkipBack className="w-3.5 h-3.5" />
-              </button>
-              <span className="font-mono-hud text-[10px] text-[#E6F8FF] tabular-nums">
-                {String(activeIdx).padStart(2, '0')}/{String(totalCount).padStart(2, '0')}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  hudSound.playDetentClick();
-                  onStepTrack(1);
-                }}
-                aria-label="Next card"
-                className="p-1 text-[#00F0FF] hover:text-white cursor-pointer"
-              >
-                <SkipForward className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
         </motion.div>
 

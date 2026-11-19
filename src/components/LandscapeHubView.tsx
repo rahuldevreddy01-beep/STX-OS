@@ -18,7 +18,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AMBIENT_TRACKS, ROOT_WEDGE_OPTIONS } from '../data/hudData';
-import { DeviceTelemetry, QuickToggles, WedgeId } from '../types/hud';
+import { AppItem, DeviceTelemetry, QuickToggles, WedgeId } from '../types/hud';
 import { hudSound } from '../utils/soundFx';
 import { ArcReactorCore } from './ArcReactorCore';
 import { CompassRadarDial } from './MicroGauge';
@@ -30,6 +30,8 @@ interface LandscapeHubViewProps {
   telemetry: DeviceTelemetry;
   activeWedge: WedgeId;
   onSelectWedge: (wedge: WedgeId, openTool?: boolean) => void;
+  apps: AppItem[];
+  onLaunchApp: (app: AppItem) => void;
   onOpenSettings: () => void;
   onEnableSensors: () => Promise<boolean>;
   onScanBluetooth: () => Promise<string | null>;
@@ -42,6 +44,7 @@ interface LandscapeHubViewProps {
   voiceActive: boolean;
   onToggleVoice: () => void;
   pulseTrigger: number;
+  notifCount: number;
 }
 
 function formatUptime(sec: number) {
@@ -57,6 +60,8 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
   telemetry,
   activeWedge,
   onSelectWedge,
+  apps,
+  onLaunchApp,
   onOpenSettings,
   onEnableSensors,
   onScanBluetooth,
@@ -69,6 +74,7 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
   voiceActive,
   onToggleVoice,
   pulseTrigger,
+  notifCount,
 }) => {
   const dialWrapRef = useRef<HTMLDivElement | null>(null);
   const [dialSize, setDialSize] = useState(248);
@@ -80,7 +86,7 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
       const w = el.clientWidth;
       const h = el.clientHeight;
       if (w > 0 && h > 0) {
-        const next = Math.max(150, Math.min(264, Math.floor(Math.min(w, h) * 0.94)));
+        const next = Math.max(176, Math.min(310, Math.floor(Math.min(w, h) * 0.96)));
         setDialSize(next);
       }
     };
@@ -130,19 +136,26 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
           <main className="order-1 sm:order-2 sm:col-span-6 relative flex flex-col items-center justify-between min-h-[245px] sm:min-h-0 py-0.5">
             <div className="flex items-center gap-2 z-10 shrink-0">
               <span className="font-mono-hud text-[9px] tracking-[0.2em] text-[#FF2A4B]">
-                [{activeConfig.shortCode}]
+                {activeConfig.shortCode}
               </span>
               <span className="font-display text-[10px] sm:text-xs font-bold tracking-[0.18em] text-[#E6F8FF] text-glow-cyan">
                 {activeConfig.label}
               </span>
-              <span className="hidden md:inline font-mono-hud text-[8.5px] tracking-[0.14em] text-[#00F0FF]/65">
-                · CLICK WEDGE TO OPEN
-              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  hudSound.playChime();
+                  onSelectWedge('APPS', true);
+                }}
+                className="px-2 py-0.5 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[8.5px] tracking-[0.14em] text-[#9FEFFF] cursor-pointer"
+              >
+                {apps.length} APPS 3D
+              </button>
             </div>
 
             <div
               ref={dialWrapRef}
-              className="relative flex items-center justify-center flex-1 w-full min-h-[164px] sm:min-h-0 py-1"
+              className="relative flex items-center justify-center flex-1 w-full min-h-[190px] sm:min-h-0 py-0.5"
             >
               <ArcReactorCore
                 variant="rotary-hub"
@@ -151,6 +164,15 @@ export const LandscapeHubView: React.FC<LandscapeHubViewProps> = ({
                 onSelectOption={(id, open) => onSelectWedge(id as WedgeId, open)}
                 size={dialSize}
                 pulseTrigger={pulseTrigger}
+                apps={apps}
+                onLaunchApp={onLaunchApp}
+                toggles={toggles}
+                onToggleControl={onToggleControl}
+                onOpenSettings={onOpenSettings}
+                pitchDeg={telemetry.pitchDeg}
+                rollDeg={telemetry.rollDeg}
+                voiceActive={voiceActive}
+                notifCount={notifCount}
               />
             </div>
 

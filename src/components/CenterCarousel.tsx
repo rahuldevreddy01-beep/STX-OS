@@ -15,7 +15,6 @@ import {
   Pin,
   RefreshCw,
   Search,
-  Sliders,
   Trash2,
   Unlock,
   Wifi,
@@ -211,6 +210,8 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const swipeRef = useRef<{ x: number; y: number } | null>(null);
+  const justSwipedRef = useRef(false);
+  const wheelLockRef = useRef(0);
 
   const activeIdx = Math.max(
     0,
@@ -249,6 +250,15 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
     };
   }, [activeWedge, liveCameraEnabled]);
 
+  const stepOption = (dir: -1 | 1) => {
+    if (dialOptions.length <= 1) return;
+    const nextIdx = (activeIdx + dir + dialOptions.length) % dialOptions.length;
+    if (dialOptions[nextIdx]) {
+      hudSound.playDetentClick();
+      onSelectSubOption(dialOptions[nextIdx].id, false);
+    }
+  };
+
   const handleCardPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest('button, input, a')) return;
     swipeRef.current = { x: e.clientX, y: e.clientY };
@@ -259,14 +269,25 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
     const dx = e.clientX - swipeRef.current.x;
     const dy = e.clientY - swipeRef.current.y;
     swipeRef.current = null;
-    if (Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy) * 1.2 && dialOptions.length > 1) {
-      const dir = dx < 0 ? 1 : -1;
-      const nextIdx = (activeIdx + dir + dialOptions.length) % dialOptions.length;
-      if (dialOptions[nextIdx]) {
-        hudSound.playDetentClick();
-        onSelectSubOption(dialOptions[nextIdx].id, false);
-      }
+    if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(dy) * 1.15 && dialOptions.length > 1) {
+      justSwipedRef.current = true;
+      window.setTimeout(() => {
+        justSwipedRef.current = false;
+      }, 120);
+      stepOption(dx < 0 ? 1 : -1);
     }
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (dialOptions.length <= 1) return;
+    const absX = Math.abs(e.deltaX);
+    const absY = Math.abs(e.deltaY);
+    if (absX < 18 && absY < 24) return;
+    const nowMs = Date.now();
+    if (nowMs - wheelLockRef.current < 160) return;
+    wheelLockRef.current = nowMs;
+    const delta = absX >= absY ? e.deltaX : e.deltaY;
+    stepOption(delta > 0 ? 1 : -1);
   };
 
   const renderCardContent = (opt: DialOption, isFront: boolean) => {
@@ -402,106 +423,69 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
       );
     }
 
-    // B. ANDROID APPS CAROUSEL CARDS (Click app to open Windowed Popup, or click IN-APP DIAL for Level 3!)
+    // B. ANDROID APPS CAROUSEL CARDS (Tap card directly to open app window; Level-3 dial via Half-Dial or Popup)
     if (activeWedge === 'APPS') {
       const app = apps.find((a) => a.id === opt.id) ?? apps[0];
       return (
-        <div className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5">
-          <div className="flex items-start justify-between border-b border-[#00F0FF]/15 pb-1.5 sm:pb-2 gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={() => (onLaunchApp ? onLaunchApp(app) : onSelectSubOption(app.id, true))}
-              className="min-w-0 text-left group cursor-pointer"
-            >
+        <div
+          onClick={() => {
+            if (!isFront || justSwipedRef.current) return;
+            if (onLaunchApp) {
+              onLaunchApp(app);
+            } else {
+              onSelectSubOption(app.id, true);
+            }
+          }}
+          className="flex flex-col justify-between h-full gap-2 overflow-y-auto hud-scroll pr-0.5 cursor-pointer group"
+        >
+          <div className="flex items-start justify-between border-b border-[#00F0FF]/15 pb-2 gap-2 shrink-0">
+            <div className="min-w-0">
               <div className="font-mono-hud text-[8.5px] sm:text-[9px] tracking-[0.16em] text-[#00F0FF]/75 truncate">
                 {app.category} · {app.packageId}
               </div>
-              <h3 className="font-display text-base sm:text-xl font-bold tracking-[0.12em] text-[#E6F8FF] group-hover:text-[#00F0FF] text-glow-cyan mt-0.5 truncate transition-colors">
+              <h3 className="font-display text-lg sm:text-2xl font-bold tracking-[0.12em] text-[#E6F8FF] group-hover:text-[#00F0FF] text-glow-cyan mt-0.5 truncate transition-colors">
                 {app.name}
               </h3>
-            </button>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              {onLaunchApp && (
-                <button
-                  type="button"
-                  onClick={() => onLaunchApp(app)}
-                  className="flex items-center gap-1 px-2.5 py-1 border border-[#00F0FF] bg-[#00F0FF]/20 hover:bg-[#00F0FF]/35 font-mono-hud text-[9px] tracking-wider text-white cursor-pointer"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>OPEN</span>
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => onSelectSubOption(app.id, true)}
-                className="flex items-center gap-1 px-2 py-1 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[9px] tracking-wider text-[#9FEFFF] cursor-pointer"
-                title="App Deep Settings Dial"
-              >
-                <Sliders className="w-3 h-3" />
-                <span className="hidden sm:inline">DIAL</span>
-              </button>
             </div>
+            <span className="font-mono-hud text-[9px] px-2 py-0.5 border border-[#00F0FF]/35 text-[#00F0FF] shrink-0">
+              v{app.version ?? '1.0'}
+            </span>
           </div>
 
-          <div className="space-y-1.5 flex-1 flex flex-col justify-center">
-            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+          <div className="space-y-2 flex-1 flex flex-col justify-center">
+            <div className="flex items-center justify-between font-mono-hud text-[10.5px] border-b border-[#00F0FF]/10 pb-1.5 gap-2">
               <span className="text-[#E6F8FF]/55">STATE</span>
               <span className="text-[#00F0FF] font-bold">{app.status}</span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+            <div className="flex items-center justify-between font-mono-hud text-[10.5px] border-b border-[#00F0FF]/10 pb-1.5 gap-2">
               <span className="text-[#E6F8FF]/55 shrink-0">PERMISSIONS</span>
               <span className="text-[#E6F8FF] truncate">{app.permissions}</span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] border-b border-[#00F0FF]/10 pb-1 gap-2">
+            <div className="flex items-center justify-between font-mono-hud text-[10.5px] border-b border-[#00F0FF]/10 pb-1.5 gap-2">
               <span className="text-[#E6F8FF]/55">BATTERY / STORAGE</span>
               <span className="text-[#9FEFFF]">
                 {app.batteryOpt ?? 'OPTIMIZED'} · {app.storageMb ?? 24} MB
               </span>
             </div>
-            <div className="flex items-center justify-between font-mono-hud text-[10px] gap-2">
-              <span className="text-[#E6F8FF]/55">QUICK CONTROLS</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onToggleAppSetting(app.id, 'pinnedToDock')}
-                  className={`px-2 py-0.5 border text-[8.5px] cursor-pointer ${
-                    app.pinnedToDock
-                      ? 'border-[#00F0FF] text-[#00F0FF] bg-[#00F0FF]/10'
-                      : 'border-[#E6F8FF]/25 text-[#E6F8FF]/55'
-                  }`}
-                >
-                  {app.pinnedToDock ? 'PINNED' : 'PIN'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onToggleAppSetting(app.id, 'notificationsEnabled')}
-                  className={`px-2 py-0.5 border text-[8.5px] cursor-pointer ${
-                    app.notificationsEnabled
-                      ? 'border-[#00F0FF]/60 text-[#E6F8FF]'
-                      : 'border-[#FF2A4B]/50 text-[#FF2A4B]'
-                  }`}
-                >
-                  {app.notificationsEnabled ? 'ALERTS ON' : 'MUTED'}
-                </button>
-              </div>
+            <div className="flex items-center justify-between font-mono-hud text-[10.5px] gap-2">
+              <span className="text-[#E6F8FF]/55">DOCK / ALERTS</span>
+              <span className="text-[#E6F8FF]/85">
+                {app.pinnedToDock ? 'PINNED' : 'UNPINNED'} ·{' '}
+                {app.notificationsEnabled ? 'ALERTS ON' : 'MUTED'}
+              </span>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-1.5 border-t border-[#00F0FF]/15 shrink-0 gap-2">
+          <div className="flex items-center justify-between pt-2 border-t border-[#00F0FF]/15 shrink-0 gap-2">
             <div className="flex items-center gap-1.5 min-w-0">
               <Grid className="w-3.5 h-3.5 text-[#00F0FF] shrink-0" />
-              <span className="font-mono-hud text-[8.5px] text-[#E6F8FF]/65 truncate">
-                TAP OPEN FOR WINDOWED APP
+              <span className="font-mono-hud text-[9px] text-[#00F0FF] tracking-wider truncate">
+                TAP CARD TO OPEN
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => onSelectSubOption(app.id, true)}
-              className="font-mono-hud text-[9px] text-[#FF2A4B] font-bold hover:underline cursor-pointer shrink-0"
-            >
-              APP SETTINGS →
-            </button>
+            <span className="font-mono-hud text-[8.5px] text-[#E6F8FF]/45 shrink-0">
+              SWIPE TO BROWSE
+            </span>
           </div>
         </div>
       );
@@ -1146,6 +1130,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
       ref={containerRef}
       onPointerDown={handleCardPointerDown}
       onPointerUp={handleCardPointerUp}
+      onWheel={handleWheel}
       className="relative h-full w-full flex items-center justify-center overflow-hidden touch-pan-y"
       style={{ perspective: '1000px' }}
     >
@@ -1178,7 +1163,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
               mass: 0.75,
             }}
             onClick={() => {
-              if (!isFront) {
+              if (!isFront && !justSwipedRef.current) {
                 hudSound.playDetentClick();
                 onSelectSubOption(opt.id, false);
               }
@@ -1188,7 +1173,7 @@ export const CenterCarousel: React.FC<CenterCarouselProps> = ({
               transformStyle: 'preserve-3d',
               willChange: 'transform, opacity',
             }}
-            className={`absolute w-[90%] sm:w-[78%] md:w-[72%] h-[94%] sm:h-[92%] border bg-[#040810]/96 p-3 sm:p-5 flex flex-col justify-between shadow-[0_10px_30px_rgba(0,0,0,0.85)] ${
+            className={`absolute w-[92%] sm:w-[82%] md:w-[76%] h-[96%] sm:h-[96%] border bg-[#040810]/96 p-3.5 sm:p-5 flex flex-col justify-between shadow-[0_10px_30px_rgba(0,0,0,0.85)] ${
               isFront
                 ? 'border-[#00F0FF]/50 pointer-events-auto'
                 : 'border-[#00F0FF]/20 cursor-pointer pointer-events-auto'
