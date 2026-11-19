@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, RotateCw, ShieldAlert } from 'lucide-react';
+import { ChevronLeft, Maximize2, Minimize2, RotateCw, ShieldAlert } from 'lucide-react';
 import { HingeTransitionOverlay } from './components/HingeTransitionOverlay';
 import { LandscapeHubView } from './components/LandscapeHubView';
 import { LandscapeToolView } from './components/LandscapeToolView';
@@ -74,7 +74,24 @@ export default function App() {
     },
   ]);
 
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() =>
+    typeof document !== 'undefined' ? Boolean(document.fullscreenElement) : false
+  );
+
   const hingeTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const doc = document as Document & { webkitFullscreenElement?: Element | null };
+      setIsFullscreen(Boolean(doc.fullscreenElement || doc.webkitFullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -95,6 +112,35 @@ export default function App() {
   useEffect(() => {
     hudSound.muted = toggles.mute;
   }, [toggles.mute]);
+
+  const handleToggleFullscreen = useCallback(async () => {
+    hudSound.playDetentClick();
+    try {
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+        webkitExitFullscreen?: () => Promise<void> | void;
+      };
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void> | void;
+      };
+
+      if (!doc.fullscreenElement && !doc.webkitFullscreenElement) {
+        if (el.requestFullscreen) {
+          await el.requestFullscreen();
+        } else if (el.webkitRequestFullscreen) {
+          await el.webkitRequestFullscreen();
+        }
+      } else {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
+      }
+    } catch {
+      // Ignore fullscreen rejection (e.g. restricted iframe policies)
+    }
+  }, []);
 
   const triggerHingeTransition = useCallback(
     (nextMode: HudMode, direction: 'horizontal' | 'vertical' = 'horizontal') => {
@@ -668,17 +714,18 @@ export default function App() {
       </div>
 
       {/* MINIMAL NATIVE-STYLE BOTTOM LAUNCHER MODE BAR */}
-      <div className="relative z-40 h-[44px] w-full flex items-center justify-center gap-2 px-3 bg-[#020306]/90 border-t border-[#00F0FF]/15 shrink-0">
+      <div className="relative z-40 h-[44px] w-full flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-3 bg-[#020306]/90 border-t border-[#00F0FF]/15 shrink-0 overflow-x-auto hud-scroll">
         <button
           type="button"
           onClick={handleCycleMode}
-          className="flex items-center gap-1.5 px-3 py-1 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[10px] tracking-[0.14em] text-[#E6F8FF] cursor-pointer"
+          className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 border border-[#00F0FF]/45 bg-[#040A12] hover:border-[#00F0FF] font-mono-hud text-[10px] tracking-[0.14em] text-[#E6F8FF] shrink-0 cursor-pointer"
         >
           <RotateCw className="w-3 h-3 text-[#00F0FF]" />
-          <span>FOLD / ROTATE</span>
+          <span className="hidden sm:inline">FOLD / ROTATE</span>
+          <span className="sm:hidden">MODE</span>
         </button>
 
-        <div className="flex items-center gap-1 font-mono-hud text-[9.5px]">
+        <div className="flex items-center gap-1 font-mono-hud text-[9.5px] shrink-0">
           {(
             [
               { id: 'portrait', label: 'PORTRAIT', dir: 'vertical' },
@@ -691,7 +738,7 @@ export default function App() {
               key={m.id}
               type="button"
               onClick={() => triggerHingeTransition(m.id, m.dir)}
-              className={`px-2.5 py-1 border transition-colors cursor-pointer ${
+              className={`px-2 sm:px-2.5 py-1 border transition-colors cursor-pointer ${
                 mode === m.id
                   ? m.id === 'stx-cover' || m.id === 'landscape-tool'
                     ? 'border-[#FF2A4B] bg-[#FF2A4B]/20 text-white'
@@ -703,6 +750,26 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        <button
+          type="button"
+          onClick={handleToggleFullscreen}
+          aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          aria-pressed={isFullscreen}
+          title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen Website'}
+          className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1 border font-mono-hud text-[10px] tracking-[0.14em] shrink-0 transition-colors cursor-pointer ${
+            isFullscreen
+              ? 'border-[#FF2A4B] bg-[#FF2A4B]/20 text-white hover:bg-[#FF2A4B]/30'
+              : 'border-[#00F0FF]/45 bg-[#040A12] text-[#E6F8FF] hover:border-[#00F0FF]'
+          }`}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="w-3 h-3 text-[#FF2A4B]" />
+          ) : (
+            <Maximize2 className="w-3 h-3 text-[#00F0FF]" />
+          )}
+          <span className="hidden sm:inline">{isFullscreen ? 'EXIT FULL' : 'FULLSCREEN'}</span>
+        </button>
       </div>
     </div>
   );
