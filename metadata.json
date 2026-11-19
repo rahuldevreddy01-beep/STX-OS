@@ -1,0 +1,8 @@
+{
+  "name": "Remix Stark OS Launcher",
+  "description": "A high-FPS, holographic Android home screen featuring tactical HUD elements, rotary arc-reactor controls, and seamless interface morphing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
